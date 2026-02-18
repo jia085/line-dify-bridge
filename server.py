@@ -8,8 +8,15 @@ DIFY_API_URL = 'https://api.dify.ai/v1/chat-messages'
 DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 
-@app.route('/webhook', methods=['POST'])
+@app.route('/', methods=['GET'])
+def health():
+    return 'OK', 200
+
+@app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
+    if request.method == 'GET':
+        return 'Webhook endpoint is ready', 200
+    
     try:
         data = request.json
         events = data.get('events', [])
@@ -38,7 +45,8 @@ def webhook():
                 'query': user_message,
                 'user': user_id,
                 'response_mode': 'blocking'
-            }
+            },
+            timeout=30
         )
         
         dify_data = dify_response.json()
@@ -54,17 +62,16 @@ def webhook():
             json={
                 'replyToken': reply_token,
                 'messages': [{'type': 'text', 'text': ai_reply}]
-            }
+            },
+            timeout=30
         )
         
         return jsonify({'status': 'success'}), 200
         
     except Exception as e:
+        print(f'Error: {str(e)}')
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/', methods=['GET'])
-def health():
-    return 'OK', 200
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
