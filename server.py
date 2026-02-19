@@ -4,9 +4,25 @@ import os
 
 app = Flask(__name__)
 
+# Dify API 設定
 DIFY_API_URL = 'https://api.dify.ai/v1/chat-messages'
-DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
+
+# 4 組 Dify App 的 API Keys（從環境變數讀取）
+DIFY_KEYS = {
+    'A': os.environ.get('DIFY_KEY_A'),
+    'B': os.environ.get('DIFY_KEY_B'),
+    'C': os.environ.get('DIFY_KEY_C'),
+    'D': os.environ.get('DIFY_KEY_D')
+}
+
+# LINE Channel Access Token
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+
+# Google Sheets API URL
+SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
+
+# 儲存使用者的組別綁定（記憶體存儲，重啟會清空）
+user_groups = {}
 
 @app.route('/', methods=['GET'])
 def health():
@@ -29,30 +45,95 @@ def webhook():
         if event['type'] != 'message' or event['message']['type'] != 'text':
             return jsonify({'status': 'ignored'}), 200
         
-        user_message = event['message']['text']
+        user_message = event['message']['text'].strip()
         reply_token = event['replyToken']
         user_id = event['source']['userId']
         
-        # 呼叫 Dify API
-        dify_response = requests.post(
+        # 檢查是否為測試指令
+        if user_message.startswith('TEST_'):
+            group = user_message.split('_')[1].upper()
+            if group in ['A', 'B', 'C', 'D']:
+                user_groups[user_id] = group
+                reply_message = f'✅ 測試模式：已切換到 {group} 組'
+                send_line_reply(reply_token, reply_message)
+                return jsonify({'status': 'test mode activated'}), 200
+        
+        # 檢查使用者是否已綁定組別
+        if user_id not in user_groups:
+            # 第一次互動，要求輸入手機末5碼
+            if len(user_message) == 5 and user_message.isdigit():
+                # 查詢 Google Sheets
+                group = query_google_sheets(user_message)
+                if group:
+                    user_groups[user_id] = group
+                    reply_message = f'✅ 驗證成功！歡迎加入實驗。'
+                    send_line_reply(reply_token, reply_message)
+                    return jsonify({'status': 'verification success'}), 200
+                else:
+                    reply_message = '❌ 查無此代碼，請確認您的手機末5碼是否正確。'
+                    send_line_reply(reply_token, reply_message)
+                    return jsonify({'status': 'verification failed'}), 200
+            else:
+                # 尚未驗證，提示輸入手機碼
+                reply_message = '你好！請輸入您的手機末5碼以開始實驗。'
+                send_line_reply(reply_token, reply_message)
+                return jsonify({'status': 'awaiting verification'}), 200
+        
+        # 已綁定組別，正常對話
+        group = user_groups[user_id]
+        ai_reply = call_dify(group, user_message, user_id)
+        send_line_reply(reply_token, ai_reply)
+        
+        return jsonify({'status': 'success'}), 200
+        
+    except Exception as e:
+        print(f'Error: {str(e)}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def query_google_sheets(code):
+    """查詢 Google Sheets 取得組別"""
+    try:
+        response = requests.get(f'{SHEETS_API_URL}?code={code}', timeout=10)
+        data = response.json()
+        if data.get('found'):
+            return data.get('group')
+        return None
+    except Exception as e:
+        print(f'Google Sheets query error: {str(e)}')
+        return None
+
+def call_dify(group, message, user_id):
+    """呼叫對應組別的 Dify API"""
+    try:
+        dify_key = DIFY_KEYS.get(group)
+        if not dify_key:
+            return '系統錯誤：無法識別組別'
+        
+        response = requests.post(
             DIFY_API_URL,
             headers={
-                'Authorization': f'Bearer {DIFY_API_KEY}',
+                'Authorization': f'Bearer {dify_key}',
                 'Content-Type': 'application/json'
             },
             json={
                 'inputs': {},
-                'query': user_message,
+                'query': message,
                 'user': user_id,
                 'response_mode': 'blocking'
             },
             timeout=30
         )
         
-        dify_data = dify_response.json()
-        ai_reply = dify_data.get('answer', '抱歉，我現在無法回覆。')
+        data = response.json()
+        return data.get('answer', '抱歉，我現在無法回覆。')
         
-        # 回傳給 LINE
+    except Exception as e:
+        print(f'Dify API error: {str(e)}')
+        return '抱歉，系統暫時無法回應。'
+
+def send_line_reply(reply_token, message):
+    """發送 LINE 回覆"""
+    try:
         requests.post(
             'https://api.line.me/v2/bot/message/reply',
             headers={
@@ -61,16 +142,12 @@ def webhook():
             },
             json={
                 'replyToken': reply_token,
-                'messages': [{'type': 'text', 'text': ai_reply}]
+                'messages': [{'type': 'text', 'text': message}]
             },
-            timeout=30
+            timeout=10
         )
-        
-        return jsonify({'status': 'success'}), 200
-        
     except Exception as e:
-        print(f'Error: {str(e)}')
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        print(f'LINE reply error: {str(e)}')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
