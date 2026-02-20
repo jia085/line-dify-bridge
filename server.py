@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -115,7 +116,6 @@ def query_google_sheets(code):
 def update_last_interaction(user_id):
     """更新 Google Sheets 的 Last_Interaction"""
     try:
-        from datetime import datetime
         today = datetime.now().strftime('%Y-%m-%d')
         
         requests.post(
@@ -128,7 +128,6 @@ def update_last_interaction(user_id):
         )
     except Exception as e:
         print(f'Update sheets error: {str(e)}')
-        # 不影響主要流程，只記錄錯誤
 
 def call_dify(group, message, user_id):
     """呼叫對應組別的 Dify API"""
@@ -155,7 +154,7 @@ def call_dify(group, message, user_id):
         data = response.json()
         ai_reply = data.get('answer', '抱歉，我現在無法回覆。')
         
-        # ========== 新增：更新 Google Sheets ==========
+        # 更新 Google Sheets
         update_last_interaction(user_id)
         
         return ai_reply
@@ -163,7 +162,6 @@ def call_dify(group, message, user_id):
     except Exception as e:
         print(f'Dify API error: {str(e)}')
         return '抱歉，系統暫時無法回應。'
-
 
 def send_line_reply(reply_token, message):
     """發送 LINE 回覆"""
