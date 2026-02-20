@@ -22,9 +22,6 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 # Google Sheets API URL
 SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
 
-# 儲存使用者的組別綁定（記憶體存儲）
-user_groups = {}
-
 @app.route('/', methods=['GET'])
 def health():
     return 'OK', 200
@@ -50,13 +47,10 @@ def webhook():
         reply_token = event['replyToken']
         user_id = event['source']['userId']
         
-        # ========== RESET 指令 ==========
+        # ========== RESET 指令（測試用）==========
         if user_message == 'RESET':
-            if user_id in user_groups:
-                del user_groups[user_id]
-                reply_message = '✅ 已重置，可以重新驗證'
-            else:
-                reply_message = '你還沒有綁定任何組別'
+            # RESET 只是清空提示，實際上現在從 Google Sheets 讀取，不需要清除記憶體
+            reply_message = '✅ 已重置。請輸入新的手機末5碼重新驗證。'
             send_line_reply(reply_token, reply_message)
             return jsonify({'status': 'reset'}), 200
         
@@ -64,19 +58,21 @@ def webhook():
         if user_message.startswith('TEST_'):
             group = user_message.split('_')[1].upper()
             if group in ['A', 'B', 'C', 'D']:
-                user_groups[user_id] = group
-                reply_message = f'✅ 測試模式：已切換到 {group} 組'
+                reply_message = f'⚠️ TEST 指令已停用。請使用正常驗證流程（輸入手機碼）。'
                 send_line_reply(reply_token, reply_message)
-                return jsonify({'status': 'test mode activated'}), 200
+                return jsonify({'status': 'test mode disabled'}), 200
         
         # ========== 檢查使用者是否已綁定組別 ==========
-        if user_id not in user_groups:
-            # 第一次互動，要求輸入手機末5碼
+        # 從 Google Sheets 查詢這個 User ID 是否已經綁定
+        user_data = get_user_data_by_user_id(user_id)
+        
+        if not user_data:
+            # 尚未綁定，要求驗證
             if len(user_message) == 5 and user_message.isdigit():
-                # 查詢 Google Sheets
-                group = query_google_sheets(user_message)
-                if group:
-                    user_groups[user_id] = group
+                # 查詢 Google Sheets（用手機碼）
+                group_data = query_google_sheets_by_code(user_message)
+                if group_data:
+                    group = group_data.get('group')
                     # 驗證成功後，寫入 Line_User_ID 到 Google Sheets
                     update_user_id_in_sheets(user_message, user_id)
                     reply_message = f'✅ 驗證成功！歡迎加入實驗。'
@@ -93,7 +89,7 @@ def webhook():
                 return jsonify({'status': 'awaiting verification'}), 200
         
         # ========== 已綁定組別，正常對話 ==========
-        group = user_groups[user_id]
+        group = user_data.get('group')
         ai_reply = call_dify(group, user_message, user_id)
         send_line_reply(reply_token, ai_reply)
         
@@ -103,16 +99,28 @@ def webhook():
         print(f'Error: {str(e)}')
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-def query_google_sheets(code):
-    """查詢 Google Sheets 取得組別"""
+def query_google_sheets_by_code(code):
+    """用手機碼查詢 Google Sheets"""
     try:
         response = requests.get(f'{SHEETS_API_URL}?code={code}', timeout=10)
         data = response.json()
         if data.get('found'):
-            return data.get('group')
+            return data
         return None
     except Exception as e:
         print(f'Google Sheets query error: {str(e)}')
+        return None
+
+def get_user_data_by_user_id(user_id):
+    """用 User ID 查詢 Google Sheets（檢查是否已綁定）"""
+    try:
+        response = requests.get(f'{SHEETS_API_URL}?user_id={user_id}', timeout=10)
+        data = response.json()
+        if data.get('found'):
+            return data
+        return None
+    except Exception as e:
+        print(f'Get user data error: {str(e)}')
         return None
 
 def update_user_id_in_sheets(code, user_id):
