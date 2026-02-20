@@ -22,6 +22,9 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 # Google Sheets API URL
 SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
 
+# 儲存對話 ID（記憶體存儲）
+user_conversations = {}  # {user_id: conversation_id}
+
 @app.route('/', methods=['GET'])
 def health():
     return 'OK', 200
@@ -49,9 +52,12 @@ def webhook():
         
         # ========== RESET 指令（測試用）==========
         if user_message == 'RESET':
-            # 從 Google Sheets 清除 User ID
+            # 清除 Google Sheets 的 User ID
             clear_user_id_from_sheets(user_id)
-            reply_message = '✅ 已重置。請輸入新的手機末5碼重新驗證。'
+            # 清除對話記憶
+            if user_id in user_conversations:
+                del user_conversations[user_id]
+            reply_message = '✅ 已重置，可以重新驗證。'
             send_line_reply(reply_token, reply_message)
             return jsonify({'status': 'reset'}), 200
         
@@ -64,7 +70,6 @@ def webhook():
                 return jsonify({'status': 'test mode disabled'}), 200
         
         # ========== 檢查使用者是否已綁定組別 ==========
-        # 從 Google Sheets 查詢這個 User ID 是否已經綁定
         user_data = get_user_data_by_user_id(user_id)
         
         if not user_data:
@@ -184,29 +189,47 @@ def update_last_interaction(user_id):
         print(f'[ERROR] Update sheets error: {str(e)}')
 
 def call_dify(group, message, user_id):
-    """呼叫對應組別的 Dify API"""
+    """呼叫對應組別的 Dify API（帶對話記憶）"""
     try:
         dify_key = DIFY_KEYS.get(group)
         if not dify_key:
             return '系統錯誤：無法識別組別'
         
+        # 準備請求資料
+        request_data = {
+            'inputs': {},
+            'query': message,
+            'user': user_id,
+            'response_mode': 'blocking'
+        }
+        
+        # ========== 加入對話記憶 ==========
+        # 如果這個 user 有 conversation_id，就傳給 Dify
+        if user_id in user_conversations:
+            request_data['conversation_id'] = user_conversations[user_id]
+            print(f'[DEBUG] Using existing conversation: {user_conversations[user_id]}')
+        else:
+            print(f'[DEBUG] Starting new conversation for user: {user_id}')
+        
+        # 發送請求
         response = requests.post(
             DIFY_API_URL,
             headers={
                 'Authorization': f'Bearer {dify_key}',
                 'Content-Type': 'application/json'
             },
-            json={
-                'inputs': {},
-                'query': message,
-                'user': user_id,
-                'response_mode': 'blocking'
-            },
+            json=request_data,
             timeout=30
         )
         
         data = response.json()
         ai_reply = data.get('answer', '抱歉，我現在無法回覆。')
+        
+        # ========== 記住對話 ID ==========
+        # Dify 會回傳 conversation_id，記住它
+        if 'conversation_id' in data:
+            user_conversations[user_id] = data['conversation_id']
+            print(f'[DEBUG] Saved conversation ID: {data["conversation_id"]}')
         
         # 更新 Google Sheets
         update_last_interaction(user_id)
