@@ -77,6 +77,8 @@ def webhook():
                 group = query_google_sheets(user_message)
                 if group:
                     user_groups[user_id] = group
+                    # 驗證成功後，寫入 Line_User_ID 到 Google Sheets
+                    update_user_id_in_sheets(user_message, user_id)
                     reply_message = f'✅ 驗證成功！歡迎加入實驗。'
                     send_line_reply(reply_token, reply_message)
                     return jsonify({'status': 'verification success'}), 200
@@ -113,13 +115,31 @@ def query_google_sheets(code):
         print(f'Google Sheets query error: {str(e)}')
         return None
 
+def update_user_id_in_sheets(code, user_id):
+    """驗證成功後，更新 Google Sheets 的 Line_User_ID"""
+    try:
+        print(f'[DEBUG] Updating User ID for code: {code}, user_id: {user_id}')
+        
+        response = requests.post(
+            SHEETS_API_URL,
+            json={
+                'code': code,
+                'user_id': user_id
+            },
+            timeout=10
+        )
+        
+        print(f'[DEBUG] Update User ID response: {response.text}')
+        
+    except Exception as e:
+        print(f'[ERROR] Update User ID error: {str(e)}')
+
 def update_last_interaction(user_id):
     """更新 Google Sheets 的 Last_Interaction"""
     try:
         today = datetime.now().strftime('%Y-%m-%d')
         
         print(f'[DEBUG] Updating last interaction for user: {user_id}, date: {today}')
-        print(f'[DEBUG] SHEETS_API_URL: {SHEETS_API_URL}')
         
         response = requests.post(
             SHEETS_API_URL,
@@ -130,8 +150,7 @@ def update_last_interaction(user_id):
             timeout=10
         )
         
-        print(f'[DEBUG] Response status: {response.status_code}')
-        print(f'[DEBUG] Response content: {response.text}')
+        print(f'[DEBUG] Update last interaction response: {response.text}')
         
     except Exception as e:
         print(f'[ERROR] Update sheets error: {str(e)}')
