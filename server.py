@@ -7,7 +7,7 @@ app = Flask(__name__)
 # Dify API 設定
 DIFY_API_URL = 'https://api.dify.ai/v1/chat-messages'
 
-# 4 組 Dify App 的 API Keys（從環境變數讀取）
+# 4 組 Dify App 的 API Keys
 DIFY_KEYS = {
     'A': os.environ.get('DIFY_KEY_A'),
     'B': os.environ.get('DIFY_KEY_B'),
@@ -21,7 +21,7 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 # Google Sheets API URL
 SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
 
-# 儲存使用者的組別綁定（記憶體存儲，重啟會清空）
+# 儲存使用者的組別綁定（記憶體存儲）
 user_groups = {}
 
 @app.route('/', methods=['GET'])
@@ -49,7 +49,17 @@ def webhook():
         reply_token = event['replyToken']
         user_id = event['source']['userId']
         
-        # 檢查是否為測試指令
+        # ========== RESET 指令 ==========
+        if user_message == 'RESET':
+            if user_id in user_groups:
+                del user_groups[user_id]
+                reply_message = '✅ 已重置，可以重新驗證'
+            else:
+                reply_message = '你還沒有綁定任何組別'
+            send_line_reply(reply_token, reply_message)
+            return jsonify({'status': 'reset'}), 200
+        
+        # ========== TEST 指令（測試用）==========
         if user_message.startswith('TEST_'):
             group = user_message.split('_')[1].upper()
             if group in ['A', 'B', 'C', 'D']:
@@ -58,7 +68,7 @@ def webhook():
                 send_line_reply(reply_token, reply_message)
                 return jsonify({'status': 'test mode activated'}), 200
         
-        # 檢查使用者是否已綁定組別
+        # ========== 檢查使用者是否已綁定組別 ==========
         if user_id not in user_groups:
             # 第一次互動，要求輸入手機末5碼
             if len(user_message) == 5 and user_message.isdigit():
@@ -79,7 +89,7 @@ def webhook():
                 send_line_reply(reply_token, reply_message)
                 return jsonify({'status': 'awaiting verification'}), 200
         
-        # 已綁定組別，正常對話
+        # ========== 已綁定組別，正常對話 ==========
         group = user_groups[user_id]
         ai_reply = call_dify(group, user_message, user_id)
         send_line_reply(reply_token, ai_reply)
