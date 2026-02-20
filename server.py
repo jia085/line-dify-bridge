@@ -112,6 +112,24 @@ def query_google_sheets(code):
         print(f'Google Sheets query error: {str(e)}')
         return None
 
+def update_last_interaction(user_id):
+    """更新 Google Sheets 的 Last_Interaction"""
+    try:
+        from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        requests.post(
+            SHEETS_API_URL,
+            json={
+                'user_id': user_id,
+                'last_interaction': today
+            },
+            timeout=10
+        )
+    except Exception as e:
+        print(f'Update sheets error: {str(e)}')
+        # 不影響主要流程，只記錄錯誤
+
 def call_dify(group, message, user_id):
     """呼叫對應組別的 Dify API"""
     try:
