@@ -49,8 +49,9 @@ def webhook():
         
         # ========== RESET 指令（測試用）==========
         if user_message == 'RESET':
-            # RESET 只是清空提示，實際上現在從 Google Sheets 讀取，不需要清除記憶體
-            reply_message = '✅ 已重置。請輸入新的手機末5碼重新驗證。'
+            # 從 Google Sheets 清除 User ID
+            clear_user_id_from_sheets(user_id)
+            reply_message = '✅ 已重置，可以重新驗證。'
             send_line_reply(reply_token, reply_message)
             return jsonify({'status': 'reset'}), 200
         
@@ -141,6 +142,25 @@ def update_user_id_in_sheets(code, user_id):
         
     except Exception as e:
         print(f'[ERROR] Update User ID error: {str(e)}')
+
+def clear_user_id_from_sheets(user_id):
+    """RESET 時，從 Google Sheets 清除 User ID"""
+    try:
+        print(f'[DEBUG] Clearing User ID: {user_id}')
+        
+        response = requests.post(
+            SHEETS_API_URL,
+            json={
+                'clear_user_id': True,
+                'user_id': user_id
+            },
+            timeout=10
+        )
+        
+        print(f'[DEBUG] Clear User ID response: {response.text}')
+        
+    except Exception as e:
+        print(f'[ERROR] Clear User ID error: {str(e)}')
 
 def update_last_interaction(user_id):
     """更新 Google Sheets 的 Last_Interaction"""
