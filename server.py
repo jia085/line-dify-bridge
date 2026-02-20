@@ -51,7 +51,7 @@ def webhook():
         if user_message == 'RESET':
             # 從 Google Sheets 清除 User ID
             clear_user_id_from_sheets(user_id)
-            reply_message = '✅ 已重置，可以重新驗證。'
+            reply_message = '✅ 已重置。請輸入新的手機末5碼重新驗證。'
             send_line_reply(reply_token, reply_message)
             return jsonify({'status': 'reset'}), 200
         
