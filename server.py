@@ -135,11 +135,17 @@ def call_dify(group, message, user_id):
         )
         
         data = response.json()
-        return data.get('answer', '抱歉，我現在無法回覆。')
+        ai_reply = data.get('answer', '抱歉，我現在無法回覆。')
+        
+        # ========== 新增：更新 Google Sheets ==========
+        update_last_interaction(user_id)
+        
+        return ai_reply
         
     except Exception as e:
         print(f'Dify API error: {str(e)}')
         return '抱歉，系統暫時無法回應。'
+
 
 def send_line_reply(reply_token, message):
     """發送 LINE 回覆"""
