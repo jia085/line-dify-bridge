@@ -137,7 +137,7 @@ def update_user_id_in_sheets(code, user_id):
 def update_last_interaction(user_id):
     """更新 Google Sheets 的 Last_Interaction"""
     try:
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         print(f'[DEBUG] Updating last interaction for user: {user_id}, date: {today}')
         
