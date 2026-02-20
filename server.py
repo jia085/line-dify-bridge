@@ -118,7 +118,10 @@ def update_last_interaction(user_id):
     try:
         today = datetime.now().strftime('%Y-%m-%d')
         
-        requests.post(
+        print(f'[DEBUG] Updating last interaction for user: {user_id}, date: {today}')
+        print(f'[DEBUG] SHEETS_API_URL: {SHEETS_API_URL}')
+        
+        response = requests.post(
             SHEETS_API_URL,
             json={
                 'user_id': user_id,
@@ -126,8 +129,12 @@ def update_last_interaction(user_id):
             },
             timeout=10
         )
+        
+        print(f'[DEBUG] Response status: {response.status_code}')
+        print(f'[DEBUG] Response content: {response.text}')
+        
     except Exception as e:
-        print(f'Update sheets error: {str(e)}')
+        print(f'[ERROR] Update sheets error: {str(e)}')
 
 def call_dify(group, message, user_id):
     """呼叫對應組別的 Dify API"""
