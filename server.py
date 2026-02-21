@@ -61,7 +61,7 @@ def webhook():
                 del user_conversations[user_id]
             if user_id in today_interacted:
                 today_interacted.remove(user_id)
-            reply_message = '✅ 已重置，可以重新驗證。'
+            reply_message = '✅ 已重置，可以重新輸入手機末五碼進行驗證。'
             send_line_reply(reply_token, reply_message)
             return jsonify({'status': 'reset'}), 200
         
