@@ -96,6 +96,8 @@ def webhook():
         reply_token = event['replyToken']
         user_id = event['source']['userId']
         
+        print(f'[DEBUG] Received message: {user_message} from {user_id}')
+        
         # ========== RESET 指令 ==========
         if user_message == 'RESET':
             clear_user_id_from_sheets(user_id)
@@ -107,10 +109,13 @@ def webhook():
                 del d14_conversations[user_id]
             reply_message = '✅ 已重置，可以重新驗證。'
             send_line_reply(reply_token, reply_message)
+            print(f'[DEBUG] User {user_id} reset')
             return jsonify({'status': 'reset'}), 200
         
         # ========== TEST_D14 指令 ==========
         if user_message == 'TEST_D14':
+            print(f'[DEBUG] TEST_D14 triggered by {user_id}')
+            
             user_data = get_user_data_by_user_id(user_id)
             if not user_data:
                 reply_message = '請先驗證（輸入手機末5碼）'
@@ -119,21 +124,27 @@ def webhook():
             
             group = user_data.get('group')
             
+            # ⭐ 先清空舊的 D14 對話記錄（避免衝突）
+            if user_id in d14_conversations:
+                print(f'[DEBUG] Clearing old d14_conversations for {user_id}')
+                del d14_conversations[user_id]
+            
             # 強制觸發 D14
             emotion, trigger_sentence = trigger_d14('測試', group, user_id)
             
             # 開始追蹤
             d14_conversations[user_id] = 2
             
-            reply_message = f'[測試模式] D14 觸發
-{trigger_sentence}'
+            reply_message = f'[測試模式] D14 觸發\n{trigger_sentence}'
             send_line_reply(reply_token, reply_message)
+            print(f'[DEBUG] TEST_D14 completed for {user_id}, group {group}')
             return jsonify({'status': 'test_d14'}), 200
         
         # ========== D14 對話處理 ==========
         # 檢查是否在 D14 對話中
         if user_id in d14_conversations:
             turn = d14_conversations[user_id]
+            print(f'[DEBUG] D14 conversation: user={user_id}, turn={turn}')
             
             if turn <= 4:  # 第 2-4 輪用腳本
                 user_data = get_user_data_by_user_id(user_id)
@@ -146,9 +157,11 @@ def webhook():
                 # 更新 Last_Interaction
                 update_last_interaction(user_id)
                 
+                print(f'[DEBUG] D14 turn {turn} completed, next turn: {d14_conversations[user_id]}')
                 return jsonify({'status': 'success'}), 200
             else:
                 # 4 輪後刪除，恢復正常對話
+                print(f'[DEBUG] D14 conversation ended for {user_id}')
                 del d14_conversations[user_id]
                 # 繼續往下走正常對話流程
         
@@ -178,9 +191,12 @@ def webhook():
         current_day = user_data.get('current_day', 0)
         d14_triggered = user_data.get('d14_triggered', False)
         
+        print(f'[DEBUG] User verified: group={group}, day={current_day}, d14_triggered={d14_triggered}')
+        
         # 檢查是否需要觸發 D14
         if current_day == 14 and not d14_triggered:
             # 觸發 D14！
+            print(f'[DEBUG] Natural D14 trigger for {user_id}')
             emotion, trigger_sentence = trigger_d14(user_message, group, user_id)
             
             # 開始 D14 對話追蹤
@@ -200,7 +216,9 @@ def webhook():
         return jsonify({'status': 'success'}), 200
         
     except Exception as e:
-        print(f'Error: {str(e)}')
+        print(f'[ERROR] Webhook error: {str(e)}')
+        import traceback
+        traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # ========== Google Sheets 函數 ==========
@@ -214,7 +232,7 @@ def query_google_sheets_by_code(code):
             return data
         return None
     except Exception as e:
-        print(f'Google Sheets query error: {str(e)}')
+        print(f'[ERROR] Google Sheets query error: {str(e)}')
         return None
 
 def get_user_data_by_user_id(user_id):
@@ -226,7 +244,7 @@ def get_user_data_by_user_id(user_id):
             return data
         return None
     except Exception as e:
-        print(f'Get user data error: {str(e)}')
+        print(f'[ERROR] Get user data error: {str(e)}')
         return None
 
 def update_user_id_in_sheets(code, user_id):
@@ -389,7 +407,7 @@ def call_dify(group, message, user_id):
         return ai_reply
         
     except Exception as e:
-        print(f'Dify API error: {str(e)}')
+        print(f'[ERROR] Dify API error: {str(e)}')
         return '抱歉，系統暫時無法回應。'
 
 # ========== LINE 函數 ==========
@@ -410,7 +428,7 @@ def send_line_reply(reply_token, message):
             timeout=10
         )
     except Exception as e:
-        print(f'LINE reply error: {str(e)}')
+        print(f'[ERROR] LINE reply error: {str(e)}')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
