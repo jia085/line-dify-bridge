@@ -42,27 +42,31 @@ D14_TRIGGERS = {
     'Neutral': '你是不是想太多了？'
 }
 
-# 後續腳本（依組別）
+# 後續腳本（依組別）- 加入第 5 輪過渡
 D14_SCRIPTS = {
     'A': {  # 協作型
         2: '抱歉，我可能誤會了你的意思。你願意多說一點嗎？',
         3: '我想我剛才的反應不太對。我們一起想想怎麼看待這件事吧。',
-        4: '謝謝你願意跟我分享。'
+        4: '謝謝你願意跟我分享。',
+        5: '很高興我們能好好聊聊。那你今天過得怎麼樣？'  # 過渡腳本
     },
     'B': {  # 攻擊型
         2: '我只是說實話而已。你不用這麼激動吧。',
         3: '好啦，也許是我太直接了。',
-        4: '算了，這話題先放著吧。'
+        4: '算了，這話題先放著吧。',
+        5: '好了，聊點別的吧。你今天有什麼有趣的事嗎？'  # 過渡腳本
     },
     'C': {  # 遷就型
         2: '對不起，是我說錯話了。讓你不開心了。',
         3: '真的很抱歉。你說得對，是我太白目了。',
-        4: '辛苦了，要記得多休息喔。'
+        4: '辛苦了，要記得多休息喔。',
+        5: '真的很抱歉剛才的誤會。你今天還好嗎？'  # 過渡腳本
     },
     'D': {  # 迴避型
         2: '嗯，我知道了。對了，你晚餐吃了嗎？',
         3: '這件事就先放著吧。',
-        4: '我們晚點聊好了。'
+        4: '我們晚點聊好了。',
+        5: '嗯...你今天吃了什麼？'  # 過渡腳本
     }
 }
 
@@ -124,7 +128,7 @@ def webhook():
             
             group = user_data.get('group')
             
-            # ⭐ 先清空舊的 D14 對話記錄（避免衝突）
+            # 先清空舊的 D14 對話記錄（避免衝突）
             if user_id in d14_conversations:
                 print(f'[DEBUG] Clearing old d14_conversations for {user_id}')
                 del d14_conversations[user_id]
@@ -146,7 +150,7 @@ def webhook():
             turn = d14_conversations[user_id]
             print(f'[DEBUG] D14 conversation: user={user_id}, turn={turn}')
             
-            if turn <= 4:  # 第 2-4 輪用腳本
+            if turn <= 5:  # 第 2-5 輪用腳本（加入第 5 輪過渡）
                 user_data = get_user_data_by_user_id(user_id)
                 group = user_data.get('group')
                 ai_reply = D14_SCRIPTS[group].get(turn, '嗯。')
@@ -160,7 +164,7 @@ def webhook():
                 print(f'[DEBUG] D14 turn {turn} completed, next turn: {d14_conversations[user_id]}')
                 return jsonify({'status': 'success'}), 200
             else:
-                # 4 輪後刪除，恢復正常對話
+                # 5 輪後刪除，恢復正常對話
                 print(f'[DEBUG] D14 conversation ended for {user_id}')
                 del d14_conversations[user_id]
                 # 繼續往下走正常對話流程
