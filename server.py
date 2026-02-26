@@ -42,31 +42,23 @@ D14_TRIGGERS = {
     'Neutral': '你是不是想太多了？'
 }
 
-# 後續腳本（依組別）- 加入第 5 輪過渡
+# ⭐⭐⭐ 後續腳本（依組別）- 縮短為 3 輪 ⭐⭐⭐
 D14_SCRIPTS = {
     'A': {  # 協作型
         2: '抱歉，我可能誤會了你的意思。你願意多說一點嗎？',
-        3: '我想我剛才的反應不太對。我們一起想想怎麼看待這件事吧。',
-        4: '謝謝你願意跟我分享。',
-        5: '很高興我們能好好聊聊。那你今天過得怎麼樣？'  # 過渡腳本
+        3: '好的，我們繼續聊吧。'
     },
     'B': {  # 攻擊型
         2: '我只是說實話而已。你不用這麼激動吧。',
-        3: '好啦，也許是我太直接了。',
-        4: '算了，這話題先放著吧。',
-        5: '好了，聊點別的吧。你今天有什麼有趣的事嗎？'  # 過渡腳本
+        3: '算了，聊點別的吧。'
     },
     'C': {  # 遷就型
         2: '對不起，是我說錯話了。讓你不開心了。',
-        3: '真的很抱歉。你說得對，是我太白目了。',
-        4: '辛苦了，要記得多休息喔。',
-        5: '真的很抱歉剛才的誤會。你今天還好嗎？'  # 過渡腳本
+        3: '你今天還好嗎？'
     },
     'D': {  # 迴避型
-        2: '嗯，我知道了。對了，你晚餐吃了嗎？',
-        3: '這件事就先放著吧。',
-        4: '我們晚點聊好了。',
-        5: '嗯...你今天吃了什麼？'  # 過渡腳本
+        2: '嗯，我知道了。',
+        3: '你今天吃了什麼？'
     }
 }
 
@@ -136,12 +128,9 @@ def webhook():
             # 強制觸發 D14
             emotion, trigger_sentence = trigger_d14('測試', group, user_id)
             
-            # ⭐⭐⭐ 新增：讓 Dify 記住觸發語句 ⭐⭐⭐
-            # 呼叫 Dify（讓它知道這次對話），但不用回覆
+            # 讓 Dify 記住觸發語句
             print(f'[DEBUG] Feeding trigger to Dify for memory')
-            _ = call_dify(group, '測試', user_id)  # 使用者說的話
-            # Dify 會記住：User: "測試" / AI: (Dify自己的回覆)
-            # 但我們不用 Dify 的回覆，直接發送觸發語句
+            _ = call_dify(group, '測試', user_id)
             
             # 開始追蹤
             d14_conversations[user_id] = 2
@@ -157,15 +146,15 @@ def webhook():
             turn = d14_conversations[user_id]
             print(f'[DEBUG] D14 conversation: user={user_id}, turn={turn}')
             
-            if turn <= 5:  # 第 2-5 輪用腳本
+            # ⭐⭐⭐ 改成 3 輪 ⭐⭐⭐
+            if turn <= 3:  # 第 2-3 輪用腳本
                 user_data = get_user_data_by_user_id(user_id)
                 group = user_data.get('group')
                 
                 # 固定腳本
                 ai_reply = D14_SCRIPTS[group].get(turn, '嗯。')
                 
-                # ⭐⭐⭐ 關鍵修改：呼叫 Dify 但不用回覆 ⭐⭐⭐
-                # 目的：讓 Dify 記住這次對話內容
+                # 呼叫 Dify 但不用回覆（讓 Dify 記住對話）
                 print(f'[DEBUG] Feeding turn {turn} to Dify for memory')
                 dify_reply = call_dify(group, user_message, user_id)
                 print(f'[DEBUG] Dify generated: {dify_reply[:50]}... (not used)')
@@ -175,14 +164,11 @@ def webhook():
                 
                 d14_conversations[user_id] += 1
                 
-                # 不要在這裡呼叫 update_last_interaction
-                # 因為 call_dify 裡面已經呼叫了
-                
                 print(f'[DEBUG] D14 turn {turn} completed, next turn: {d14_conversations[user_id]}')
                 return jsonify({'status': 'success'}), 200
             else:
-                # 5 輪後刪除，恢復正常對話
-                print(f'[DEBUG] D14 conversation ended for {user_id}')
+                # ⭐⭐⭐ 3 輪後刪除，恢復正常對話 ⭐⭐⭐
+                print(f'[DEBUG] D14 conversation ended for {user_id} (3 turns completed)')
                 del d14_conversations[user_id]
                 # 繼續往下走正常對話流程
         
@@ -220,7 +206,7 @@ def webhook():
             print(f'[DEBUG] Natural D14 trigger for {user_id}')
             emotion, trigger_sentence = trigger_d14(user_message, group, user_id)
             
-            # ⭐⭐⭐ 新增：讓 Dify 記住觸發對話 ⭐⭐⭐
+            # 讓 Dify 記住觸發對話
             print(f'[DEBUG] Feeding natural trigger to Dify for memory')
             _ = call_dify(group, user_message, user_id)
             
@@ -228,9 +214,6 @@ def webhook():
             d14_conversations[user_id] = 2  # 下次是第 2 輪
             
             send_line_reply(reply_token, trigger_sentence)
-            
-            # 不要在這裡呼叫 update_last_interaction
-            # 因為 call_dify 裡面已經呼叫了
             
             return jsonify({'status': 'd14_triggered'}), 200
         
