@@ -42,28 +42,78 @@ D14_TRIGGERS = {
     'Neutral': '你是不是想太多了？'
 }
 
-# ⭐⭐⭐ 後續腳本（依組別）- 縮短為 3 輪 ⭐⭐⭐
+# ⭐⭐⭐ 分支腳本（依組別 + 使用者反應）⭐⭐⭐
 D14_SCRIPTS = {
     'A': {  # 協作型
         2: '抱歉，我可能誤會了你的意思。你願意多說一點嗎？',
-        3: '好的，我們繼續聊吧。'
+        # 第 3 輪：根據使用者反應分支
+        '3_cooperative': '很高興你願意跟我聊，我們一起來想想吧。',
+        '3_refuse': '我理解你可能不太想說。沒關係，我們可以慢慢來，你什麼時候想聊都可以。',
+        '3_question': '你說得對，我應該先理解你為什麼有這樣的感受。你願意告訴我嗎？',
+        '3_neutral': '好的，那我們繼續聊吧。你想從哪裡開始？'
     },
     'B': {  # 攻擊型
         2: '我只是說實話而已。你不用這麼激動吧。',
-        3: '算了，聊點別的吧。'
+        # 第 3 輪：根據使用者反應分支
+        '3_cooperative': '那你就說啊，我在聽。',
+        '3_refuse': '不想說就算了，反正我也只是問問而已。',
+        '3_question': '我哪裡說錯了嗎？我覺得我的看法很合理啊。',
+        '3_neutral': '好啦，那你到底想怎樣？'
     },
     'C': {  # 遷就型
         2: '對不起，是我說錯話了。讓你不開心了。',
-        3: '你今天還好嗎？'
+        # 第 3 輪：根據使用者反應分支
+        '3_cooperative': '謝謝你願意跟我說，真的很感謝。',
+        '3_refuse': '對不起對不起，是我太白目了。你不用勉強自己，都是我的錯。',
+        '3_question': '是我的問題，我不該那樣說的。真的很抱歉。',
+        '3_neutral': '你今天還好嗎？需要聊聊嗎？'
     },
     'D': {  # 迴避型
         2: '嗯，我知道了。',
-        3: '你今天吃了什麼？'
+        # 第 3 輪：根據使用者反應分支
+        '3_cooperative': '喔...那你說吧。',
+        '3_refuse': '好，那就不聊了。你今天吃了什麼？',
+        '3_question': '嗯...我們聊別的吧。',
+        '3_neutral': '你今天吃了什麼？'
     }
 }
 
 # 追蹤 D14 對話輪數
 d14_conversations = {}  # {user_id: turn_count}
+
+# ========== 輔助函數 ==========
+
+def detect_user_response_type(user_message):
+    """
+    偵測使用者的反應類型
+    返回：'cooperative', 'refuse', 'question', 'neutral'
+    """
+    # 合作關鍵字
+    cooperative_keywords = ['好', '可以', '嗯嗯', '是', '對', '想', '願意', '要', '會', '行']
+    
+    # 拒絕關鍵字
+    refuse_keywords = ['不要', '不想', '不行', '不會', '不', '沒有', '不用', '算了', '免了']
+    
+    # 質疑關鍵字
+    question_keywords = ['為什麼', '為何', '怎麼', '什麼', '幹嘛', '幹麻', '你在', '?', '？', '憑什麼']
+    
+    message = user_message.lower()
+    
+    # 優先檢查拒絕（最明確）
+    if any(word in message for word in refuse_keywords):
+        return 'refuse'
+    
+    # 其次檢查質疑
+    elif any(word in message for word in question_keywords):
+        return 'question'
+    
+    # 再檢查合作
+    elif any(word in message for word in cooperative_keywords):
+        return 'cooperative'
+    
+    # 預設為中性
+    else:
+        return 'neutral'
 
 # ========== 路由 ==========
 
@@ -146,13 +196,22 @@ def webhook():
             turn = d14_conversations[user_id]
             print(f'[DEBUG] D14 conversation: user={user_id}, turn={turn}')
             
-            # ⭐⭐⭐ 改成 3 輪 ⭐⭐⭐
             if turn <= 3:  # 第 2-3 輪用腳本
                 user_data = get_user_data_by_user_id(user_id)
                 group = user_data.get('group')
                 
-                # 固定腳本
-                ai_reply = D14_SCRIPTS[group].get(turn, '嗯。')
+                # ⭐⭐⭐ 分支邏輯 ⭐⭐⭐
+                if turn == 2:
+                    # 第 2 輪：固定腳本
+                    ai_reply = D14_SCRIPTS[group][2]
+                    
+                elif turn == 3:
+                    # 第 3 輪：根據使用者反應選擇分支
+                    response_type = detect_user_response_type(user_message)
+                    script_key = f'3_{response_type}'
+                    ai_reply = D14_SCRIPTS[group].get(script_key, D14_SCRIPTS[group]['3_neutral'])
+                    
+                    print(f'[DEBUG] User response type: {response_type}, using script: {script_key}')
                 
                 # 呼叫 Dify 但不用回覆（讓 Dify 記住對話）
                 print(f'[DEBUG] Feeding turn {turn} to Dify for memory')
@@ -167,7 +226,7 @@ def webhook():
                 print(f'[DEBUG] D14 turn {turn} completed, next turn: {d14_conversations[user_id]}')
                 return jsonify({'status': 'success'}), 200
             else:
-                # ⭐⭐⭐ 3 輪後刪除，恢復正常對話 ⭐⭐⭐
+                # 3 輪後刪除，恢復正常對話
                 print(f'[DEBUG] D14 conversation ended for {user_id} (3 turns completed)')
                 del d14_conversations[user_id]
                 # 繼續往下走正常對話流程
