@@ -83,50 +83,72 @@ def is_sharing_personal_experience(user_message):
     """
     偵測使用者是否在分享個人經驗或情緒
     
-    保守版邏輯：
-    - 必須包含「我」（第一人稱）
-    - 必須包含情緒或事件關鍵字
-    - 排除太短的訊息
+    放寬版邏輯（解決沒有「我」但明顯在分享的情況）：
+    1. 有「我」+ 情緒/事件 → 觸發
+    2. 沒有「我」但有強烈情緒詞 → 觸發
+    3. 沒有「我」但同時有情緒+事件 → 觸發
     
-    目的：避免在不相關的對話中觸發 D14
+    目的：提高召回率，避免漏掉真實的分享
     """
     
-    # 必須包含「我」
-    if '我' not in user_message:
-        return False
-    
-    # 太短不算（可能只是「我在」「我喔」）
+    # 太短不算（可能只是「我在」「好喔」）
     if len(user_message) < 5:
         return False
     
-    # 情緒關鍵字
+    # 情緒關鍵字（擴充版）
     emotion_keywords = [
         # 正向情緒
         '開心', '高興', '快樂', '爽', '棒', '讚', '興奮', '期待', '滿意', '舒服',
         # 負向情緒
         '難過', '傷心', '生氣', '煩', '累', '壓力', '不爽', '慘', '糟', '痛苦',
-        '焦慮', '緊張', '失望', '後悔', '害怕', '擔心', '煩惱', '沮喪', '無聊'
+        '焦慮', '緊張', '失望', '後悔', '害怕', '擔心', '煩惱', '沮喪', '無聊',
+        '不開心', '不滿意', '難受', '辛苦', '鬱悶', '煩躁', '不舒服'
     ]
     
-    # 事件/經驗關鍵字
+    # 強烈情緒詞（即使沒有「我」也算分享）
+    strong_emotion_keywords = [
+        '好累', '超累', '很累', '累死', '累爆',
+        '好煩', '超煩', '很煩', '煩死',
+        '好開心', '超開心', '很開心',
+        '好難過', '超難過', '很難過',
+        '不開心', '不爽', '難受', '痛苦', '辛苦',
+        '好慘', '好糟', '太累', '太煩'
+    ]
+    
+    # 事件/經驗關鍵字（擴充版）
     event_keywords = [
         # 時間
-        '今天', '昨天', '剛才', '最近', '這週', '這個月', '早上', '下午', '晚上',
+        '今天', '昨天', '剛才', '最近', '這週', '這個月', '早上', '下午', '晚上', '剛剛',
         # 動作/事件
         '發生', '遇到', '碰到', '經歷', '覺得', '感覺', '想到', '遇見',
         # 人際互動
-        '跟', '和', '被', '給', '讓我', '對我', '朋友', '家人', '同事', '老闆'
+        '跟', '和', '被', '給', '讓', '朋友', '家人', '同事', '老闆', '教授', '老師',
+        # 情境
+        '上課', '工作', '學校', '公司', '論文', '報告', '考試'
     ]
     
-    # 檢查是否包含情緒或事件關鍵字
+    # 檢查各種情況
+    has_i = '我' in user_message
     has_emotion = any(word in user_message for word in emotion_keywords)
     has_event = any(word in user_message for word in event_keywords)
+    has_strong_emotion = any(word in user_message for word in strong_emotion_keywords)
     
-    # 只要有其中一種就算是在分享
-    if has_emotion or has_event:
-        print(f'[DEBUG] Sharing detected: emotion={has_emotion}, event={has_event}')
+    # 情況 1：有「我」+ （情緒 or 事件）
+    if has_i and (has_emotion or has_event):
+        print(f'[DEBUG] Sharing detected (Type 1): has_i=True, emotion={has_emotion}, event={has_event}')
         return True
     
+    # 情況 2：沒有「我」但有強烈情緒（很明顯在表達情緒）
+    if has_strong_emotion:
+        print(f'[DEBUG] Sharing detected (Type 2): strong_emotion={has_strong_emotion}')
+        return True
+    
+    # 情況 3：沒有「我」但同時有情緒+事件（很明顯在分享經歷）
+    if has_emotion and has_event:
+        print(f'[DEBUG] Sharing detected (Type 3): emotion + event')
+        return True
+    
+    print(f'[DEBUG] No sharing detected: has_i={has_i}, emotion={has_emotion}, event={has_event}, strong={has_strong_emotion}')
     return False
 
 
