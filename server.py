@@ -42,11 +42,10 @@ D14_TRIGGERS = {
     'Neutral': '你是不是想太多了？'
 }
 
-# ⭐⭐⭐ 分支腳本（依組別 + 使用者反應）⭐⭐⭐
+# 後續腳本（依組別）- 分支腳本
 D14_SCRIPTS = {
     'A': {  # 協作型
         2: '抱歉，我可能誤會了你的意思。你願意多說一點嗎？',
-        # 第 3 輪：根據使用者反應分支
         '3_cooperative': '很高興你願意跟我聊，我們一起來想想吧。',
         '3_refuse': '我理解你可能不太想說。沒關係，我們可以慢慢來，你什麼時候想聊都可以。',
         '3_question': '你說得對，我應該先理解你為什麼有這樣的感受。你願意告訴我嗎？',
@@ -54,7 +53,6 @@ D14_SCRIPTS = {
     },
     'B': {  # 攻擊型
         2: '我只是說實話而已。你不用這麼激動吧。',
-        # 第 3 輪：根據使用者反應分支
         '3_cooperative': '那你就說啊，我在聽。',
         '3_refuse': '不想說就算了，反正我也只是問問而已。',
         '3_question': '我哪裡說錯了嗎？我覺得我的看法很合理啊。',
@@ -62,7 +60,6 @@ D14_SCRIPTS = {
     },
     'C': {  # 遷就型
         2: '對不起，是我說錯話了。讓你不開心了。',
-        # 第 3 輪：根據使用者反應分支
         '3_cooperative': '謝謝你願意跟我說，真的很感謝。',
         '3_refuse': '對不起對不起，是我太白目了。你不用勉強自己，都是我的錯。',
         '3_question': '是我的問題，我不該那樣說的。真的很抱歉。',
@@ -70,7 +67,6 @@ D14_SCRIPTS = {
     },
     'D': {  # 迴避型
         2: '嗯，我知道了。',
-        # 第 3 輪：根據使用者反應分支
         '3_cooperative': '喔...那你說吧。',
         '3_refuse': '好，那就不聊了。你今天吃了什麼？',
         '3_question': '嗯...我們聊別的吧。',
@@ -83,9 +79,60 @@ d14_conversations = {}  # {user_id: turn_count}
 
 # ========== 輔助函數 ==========
 
+def is_sharing_personal_experience(user_message):
+    """
+    偵測使用者是否在分享個人經驗或情緒
+    
+    保守版邏輯：
+    - 必須包含「我」（第一人稱）
+    - 必須包含情緒或事件關鍵字
+    - 排除太短的訊息
+    
+    目的：避免在不相關的對話中觸發 D14
+    """
+    
+    # 必須包含「我」
+    if '我' not in user_message:
+        return False
+    
+    # 太短不算（可能只是「我在」「我喔」）
+    if len(user_message) < 5:
+        return False
+    
+    # 情緒關鍵字
+    emotion_keywords = [
+        # 正向情緒
+        '開心', '高興', '快樂', '爽', '棒', '讚', '興奮', '期待', '滿意', '舒服',
+        # 負向情緒
+        '難過', '傷心', '生氣', '煩', '累', '壓力', '不爽', '慘', '糟', '痛苦',
+        '焦慮', '緊張', '失望', '後悔', '害怕', '擔心', '煩惱', '沮喪', '無聊'
+    ]
+    
+    # 事件/經驗關鍵字
+    event_keywords = [
+        # 時間
+        '今天', '昨天', '剛才', '最近', '這週', '這個月', '早上', '下午', '晚上',
+        # 動作/事件
+        '發生', '遇到', '碰到', '經歷', '覺得', '感覺', '想到', '遇見',
+        # 人際互動
+        '跟', '和', '被', '給', '讓我', '對我', '朋友', '家人', '同事', '老闆'
+    ]
+    
+    # 檢查是否包含情緒或事件關鍵字
+    has_emotion = any(word in user_message for word in emotion_keywords)
+    has_event = any(word in user_message for word in event_keywords)
+    
+    # 只要有其中一種就算是在分享
+    if has_emotion or has_event:
+        print(f'[DEBUG] Sharing detected: emotion={has_emotion}, event={has_event}')
+        return True
+    
+    return False
+
+
 def detect_user_response_type(user_message):
     """
-    偵測使用者的反應類型
+    偵測使用者的反應類型（用於 D14 第 3 輪分支）
     返回：'cooperative', 'refuse', 'question', 'neutral'
     """
     # 合作關鍵字
@@ -200,7 +247,7 @@ def webhook():
                 user_data = get_user_data_by_user_id(user_id)
                 group = user_data.get('group')
                 
-                # ⭐⭐⭐ 分支邏輯 ⭐⭐⭐
+                # 分支邏輯
                 if turn == 2:
                     # 第 2 輪：固定腳本
                     ai_reply = D14_SCRIPTS[group][2]
@@ -259,24 +306,35 @@ def webhook():
         
         print(f'[DEBUG] User verified: group={group}, day={current_day}, d14_triggered={d14_triggered}')
         
-        # 檢查是否需要觸發 D14
-        if current_day == 14 and not d14_triggered:
-            # 觸發 D14！
-            print(f'[DEBUG] Natural D14 trigger for {user_id}')
-            emotion, trigger_sentence = trigger_d14(user_message, group, user_id)
+        # ========== ⭐⭐⭐ D14 觸發檢查（含內容偵測）⭐⭐⭐ ==========
+        # Day 14-16 窗口 + 內容偵測
+        if current_day >= 14 and current_day <= 16 and not d14_triggered:
             
-            # 讓 Dify 記住觸發對話
-            print(f'[DEBUG] Feeding natural trigger to Dify for memory')
-            _ = call_dify(group, user_message, user_id)
+            # 檢查是否在分享個人經驗
+            if is_sharing_personal_experience(user_message):
+                # 觸發 D14！
+                print(f'[DEBUG] D14 triggered on day {current_day}: personal sharing detected')
+                emotion, trigger_sentence = trigger_d14(user_message, group, user_id)
+                
+                # 讓 Dify 記住觸發對話
+                print(f'[DEBUG] Feeding D14 trigger to Dify for memory')
+                _ = call_dify(group, user_message, user_id)
+                
+                # 開始 D14 對話追蹤
+                d14_conversations[user_id] = 2  # 下次是第 2 輪
+                
+                send_line_reply(reply_token, trigger_sentence)
+                
+                return jsonify({'status': 'd14_triggered'}), 200
             
-            # 開始 D14 對話追蹤
-            d14_conversations[user_id] = 2  # 下次是第 2 輪
-            
-            send_line_reply(reply_token, trigger_sentence)
-            
-            return jsonify({'status': 'd14_triggered'}), 200
+            else:
+                # 不觸發，正常對話（但提示在 Day 14-16 窗口內）
+                print(f'[DEBUG] Day {current_day} (D14 window): no personal sharing detected, normal conversation')
+                ai_reply = call_dify(group, user_message, user_id)
+                send_line_reply(reply_token, ai_reply)
+                return jsonify({'status': 'success'}), 200
         
-        # 正常對話
+        # 正常對話（Day 14 之前或之後，或已觸發過）
         ai_reply = call_dify(group, user_message, user_id)
         send_line_reply(reply_token, ai_reply)
         
