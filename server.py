@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 app = Flask(__name__)
@@ -204,6 +204,61 @@ def webhook():
             send_line_reply(reply_token, reply_message)
             print(f'[DEBUG] User {user_id} reset')
             return jsonify({'status': 'reset'}), 200
+        
+        # ========== TESTDAY 指令（快速測試）==========
+        if user_message.startswith('TESTDAY'):
+            print(f'[DEBUG] TESTDAY command: {user_message}')
+            
+            # 檢查是否已驗證
+            user_data = get_user_data_by_user_id(user_id)
+            if not user_data:
+                reply_message = '❌ 請先驗證（輸入手機末5碼）'
+                send_line_reply(reply_token, reply_message)
+                return jsonify({'status': 'not_verified'}), 200
+            
+            # 解析天數
+            parts = user_message.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                target_day = int(parts[1])
+                
+                # 計算需要的 First_Interaction 日期（台灣時區）
+                tw_now = datetime.now(TW_TZ)
+                target_date = tw_now - timedelta(days=target_day)
+                target_date_str = target_date.strftime('%Y-%m-%d %H:%M:%S')
+                
+                print(f'[DEBUG] Setting Day {target_day}: First_Interaction = {target_date_str}')
+                
+                # 更新 Google Sheets（設定日期 + 重置 D14）
+                try:
+                    response = requests.post(
+                        SHEETS_API_URL,
+                        json={
+                            'user_id': user_id,
+                            'testday': True,
+                            'first_interaction': target_date_str,
+                            'reset_d14': True  # 重置 D14 觸發狀態
+                        },
+                        timeout=10
+                    )
+                    print(f'[DEBUG] TESTDAY update response: {response.text}')
+                    
+                    # 清除本地 D14 對話記錄
+                    if user_id in d14_conversations:
+                        del d14_conversations[user_id]
+                    
+                    reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}\n\n現在可以測試 D14 觸發了！'
+                    send_line_reply(reply_token, reply_message)
+                    return jsonify({'status': 'testday_set'}), 200
+                    
+                except Exception as e:
+                    print(f'[ERROR] TESTDAY failed: {str(e)}')
+                    reply_message = f'❌ 設定失敗：{str(e)}'
+                    send_line_reply(reply_token, reply_message)
+                    return jsonify({'status': 'error'}), 500
+            else:
+                reply_message = '❌ 格式錯誤\n正確用法：TESTDAY 14\n（設定為 Day 14）'
+                send_line_reply(reply_token, reply_message)
+                return jsonify({'status': 'invalid_format'}), 200
         
         # ========== TEST_D14 指令 ==========
         if user_message == 'TEST_D14':
