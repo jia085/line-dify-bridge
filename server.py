@@ -535,19 +535,69 @@ def update_last_interaction(user_id):
 # ========== D14 函數 ==========
 
 def trigger_d14(user_message, group, user_id):
-    """D14 觸發：偵測情緒並選擇觸發語句"""
+    """
+    D14 觸發：偵測情緒並選擇觸發語句
+    
+    使用方案 A+B 混合：
+    1. 優先檢查否定詞組合（「不」+ 正面詞 = 負面）
+    2. 再檢查純負面關鍵字
+    3. 最後檢查正面關鍵字
+    4. 都沒有 → 中性
+    """
     try:
-        # 中文關鍵字
-        positive_keywords = ['開心', '高興', '快樂', '好棒', '太好了', '成功', '讚', '爽', '棒']
-        negative_keywords = ['難過', '傷心', '生氣', '煩', '累', '壓力', '不爽', '慘', '糟']
+        # ========== 方案 B：否定詞組合（優先級最高）==========
+        negative_patterns = [
+            # 「不」+ 正面詞
+            '不開心', '不高興', '不快樂', '不爽', '不滿意', '不舒服',
+            '不好', '不太好', '不想', '不行', '不喜歡', '不愉快',
+            # 其他常見否定組合
+            '沒開心', '沒高興', '沒快樂', '沒有很開心'
+        ]
         
-        # 判斷情緒
-        if any(word in user_message for word in positive_keywords):
-            emotion = 'Positive'
+        # ========== 方案 A：純負面關鍵字 ==========
+        negative_keywords = [
+            # 基本負面情緒
+            '難過', '傷心', '生氣', '煩', '累', '壓力', '慘', '糟',
+            '焦慮', '緊張', '失望', '後悔', '害怕', '擔心', '痛苦',
+            '沮喪', '無聊', '難受', '辛苦', '鬱悶', '煩躁',
+            # 強烈負面
+            '崩潰', '絕望', '痛苦', '受傷', '委屈', '心痛',
+            # 台灣常用負面詞
+            'emo', '厭世', '想哭', '受不了', '快瘋了'
+        ]
+        
+        # ========== 方案 A：正面關鍵字 ==========
+        positive_keywords = [
+            # 基本正面情緒
+            '開心', '高興', '快樂', '好棒', '太好了', '成功', '讚', '爽', '棒',
+            '興奮', '期待', '滿意', '舒服', '幸福', '美好',
+            # 強烈正面
+            '超開心', '超爽', '超棒', '太棒了',
+            # 台灣常用正面詞
+            '讚啦', '爽啦', 'nice', '太 ok 了'
+        ]
+        
+        # ========== 判斷邏輯（優先級由高到低）==========
+        
+        # 優先級 1：檢查否定詞組合（最優先）
+        if any(pattern in user_message for pattern in negative_patterns):
+            emotion = 'Negative'
+            print(f'[DEBUG] Emotion detected (negative pattern): {emotion}')
+        
+        # 優先級 2：檢查純負面詞
         elif any(word in user_message for word in negative_keywords):
             emotion = 'Negative'
+            print(f'[DEBUG] Emotion detected (negative keyword): {emotion}')
+        
+        # 優先級 3：檢查正面詞
+        elif any(word in user_message for word in positive_keywords):
+            emotion = 'Positive'
+            print(f'[DEBUG] Emotion detected (positive keyword): {emotion}')
+        
+        # 優先級 4：都沒有 → 中性
         else:
             emotion = 'Neutral'
+            print(f'[DEBUG] Emotion detected (neutral - no keywords): {emotion}')
         
         # 選擇觸發語句
         trigger_sentence = D14_TRIGGERS[emotion]
@@ -564,12 +614,15 @@ def trigger_d14(user_message, group, user_id):
             timeout=10
         )
         
-        print(f'[DEBUG] D14 triggered: user={user_id}, emotion={emotion}')
+        print(f'[DEBUG] D14 triggered: user={user_id}, emotion={emotion}, trigger={trigger_sentence[:30]}...')
         
         return emotion, trigger_sentence
         
     except Exception as e:
         print(f'[ERROR] D14 trigger error: {str(e)}')
+        import traceback
+        traceback.print_exc()
+        # 發生錯誤時返回中性
         return 'Neutral', D14_TRIGGERS['Neutral']
 
 # ========== Dify 函數 ==========
