@@ -245,7 +245,14 @@ def webhook():
                 
                 # 計算需要的 First_Interaction 日期（台灣時區）
                 tw_now = datetime.now(TW_TZ)
-                target_date = tw_now - timedelta(days=target_day)
+                
+                # ⭐ 因為 Day 1 = 驗證當天，所以要減去 (target_day - 1) 天
+                # 例如：TESTDAY 14 → 減去 13 天 → Day 14
+                target_date = tw_now - timedelta(days=target_day - 1)
+                
+                # ⭐ 強制時間為 00:00:00（避免時區差異導致天數計算錯誤）
+                target_date = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                
                 target_date_str = target_date.strftime('%Y-%m-%d %H:%M:%S')
                 
                 print(f'[DEBUG] Setting Day {target_day}: First_Interaction = {target_date_str}')
