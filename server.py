@@ -536,68 +536,67 @@ def update_last_interaction(user_id):
 
 def trigger_d14(user_message, group, user_id):
     """
-    D14 觸發：偵測情緒並選擇觸發語句
+    D14 觸發：使用 OpenAI API 偵測情緒並選擇觸發語句
     
-    使用方案 A+B 混合：
-    1. 優先檢查否定詞組合（「不」+ 正面詞 = 負面）
-    2. 再檢查純負面關鍵字
-    3. 最後檢查正面關鍵字
-    4. 都沒有 → 中性
+    使用 GPT-4o-mini 進行準確的情感分析
+    成本：約 $0.0000075 / 次
     """
     try:
-        # ========== 方案 B：否定詞組合（優先級最高）==========
-        negative_patterns = [
-            # 「不」+ 正面詞
-            '不開心', '不高興', '不快樂', '不爽', '不滿意', '不舒服',
-            '不好', '不太好', '不想', '不行', '不喜歡', '不愉快',
-            # 其他常見否定組合
-            '沒開心', '沒高興', '沒快樂', '沒有很開心'
-        ]
+        # 取得 OpenAI API Key
+        openai_api_key = os.environ.get('OPENAI_API_KEY')
         
-        # ========== 方案 A：純負面關鍵字 ==========
-        negative_keywords = [
-            # 基本負面情緒
-            '難過', '傷心', '生氣', '煩', '累', '壓力', '慘', '糟',
-            '焦慮', '緊張', '失望', '後悔', '害怕', '擔心', '痛苦',
-            '沮喪', '無聊', '難受', '辛苦', '鬱悶', '煩躁',
-            # 強烈負面
-            '崩潰', '絕望', '痛苦', '受傷', '委屈', '心痛',
-            # 台灣常用負面詞
-            'emo', '厭世', '想哭', '受不了', '快瘋了'
-        ]
-        
-        # ========== 方案 A：正面關鍵字 ==========
-        positive_keywords = [
-            # 基本正面情緒
-            '開心', '高興', '快樂', '好棒', '太好了', '成功', '讚', '爽', '棒',
-            '興奮', '期待', '滿意', '舒服', '幸福', '美好',
-            # 強烈正面
-            '超開心', '超爽', '超棒', '太棒了',
-            # 台灣常用正面詞
-            '讚啦', '爽啦', 'nice', '太 ok 了'
-        ]
-        
-        # ========== 判斷邏輯（優先級由高到低）==========
-        
-        # 優先級 1：檢查否定詞組合（最優先）
-        if any(pattern in user_message for pattern in negative_patterns):
-            emotion = 'Negative'
-            print(f'[DEBUG] Emotion detected (negative pattern): {emotion}')
-        
-        # 優先級 2：檢查純負面詞
-        elif any(word in user_message for word in negative_keywords):
-            emotion = 'Negative'
-            print(f'[DEBUG] Emotion detected (negative keyword): {emotion}')
-        
-        # 優先級 3：檢查正面詞
-        elif any(word in user_message for word in positive_keywords):
-            emotion = 'Positive'
-            print(f'[DEBUG] Emotion detected (positive keyword): {emotion}')
-        
-        # 優先級 4：都沒有 → 中性
+        if not openai_api_key:
+            print('[WARNING] OPENAI_API_KEY not found, using fallback keyword detection')
+            # Fallback：使用關鍵字方法
+            emotion = detect_emotion_fallback(user_message)
         else:
-            emotion = 'Neutral'
-            print(f'[DEBUG] Emotion detected (neutral - no keywords): {emotion}')
+            # 使用 OpenAI API
+            print(f'[DEBUG] Using OpenAI API for emotion detection')
+            
+            # 呼叫 OpenAI API
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {openai_api_key}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'gpt-4o-mini',
+                    'messages': [
+                        {
+                            'role': 'system',
+                            'content': '你是情感分析專家。請判斷使用者訊息的情緒，只回答一個英文單字：Positive（正面）、Negative（負面）或 Neutral（中性）。注意：「不開心」「不快樂」「不爽」等都是負面情緒。'
+                        },
+                        {
+                            'role': 'user',
+                            'content': f'使用者說：「{user_message}」\n\n這句話的情緒是？只回答 Positive、Negative 或 Neutral。'
+                        }
+                    ],
+                    'temperature': 0,  # 確保結果穩定
+                    'max_tokens': 10   # 只需要一個單字
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                ai_response = data['choices'][0]['message']['content'].strip()
+                
+                print(f'[DEBUG] OpenAI response: {ai_response}')
+                
+                # 解析回應
+                if 'Negative' in ai_response or '負面' in ai_response.lower():
+                    emotion = 'Negative'
+                elif 'Positive' in ai_response or '正面' in ai_response.lower():
+                    emotion = 'Positive'
+                else:
+                    emotion = 'Neutral'
+                
+                print(f'[DEBUG] Emotion detected by OpenAI: {emotion}')
+            else:
+                print(f'[ERROR] OpenAI API error: {response.status_code} {response.text}')
+                # API 失敗，使用 fallback
+                emotion = detect_emotion_fallback(user_message)
         
         # 選擇觸發語句
         trigger_sentence = D14_TRIGGERS[emotion]
@@ -622,8 +621,54 @@ def trigger_d14(user_message, group, user_id):
         print(f'[ERROR] D14 trigger error: {str(e)}')
         import traceback
         traceback.print_exc()
-        # 發生錯誤時返回中性
-        return 'Neutral', D14_TRIGGERS['Neutral']
+        # 發生錯誤時使用 fallback
+        emotion = detect_emotion_fallback(user_message)
+        return emotion, D14_TRIGGERS[emotion]
+
+
+def detect_emotion_fallback(user_message):
+    """
+    Fallback 情緒偵測（當 OpenAI API 不可用時）
+    使用方案 A+B 關鍵字方法
+    """
+    # 否定詞組合
+    negative_patterns = [
+        '不開心', '不高興', '不快樂', '不爽', '不滿意', '不舒服',
+        '不好', '不太好', '不想', '不行', '不喜歡', '不愉快',
+        '沒開心', '沒高興', '不是到太開心', '不是很開心'
+    ]
+    
+    # 負面關鍵字
+    negative_keywords = [
+        '難過', '傷心', '生氣', '煩', '累', '壓力', '慘', '糟',
+        '焦慮', '緊張', '失望', '後悔', '害怕', '擔心', '痛苦',
+        '沮喪', '無聊', '難受', '辛苦', '鬱悶', '煩躁',
+        '崩潰', '絕望', '受傷', '委屈', '心痛',
+        'emo', '厭世', '想哭', '受不了', '快瘋了'
+    ]
+    
+    # 正面關鍵字
+    positive_keywords = [
+        '開心', '高興', '快樂', '好棒', '太好了', '成功', '讚', '爽', '棒',
+        '興奮', '期待', '滿意', '舒服', '幸福', '美好',
+        '超開心', '超爽', '超棒', '太棒了', '讚啦'
+    ]
+    
+    # 判斷邏輯
+    if any(pattern in user_message for pattern in negative_patterns):
+        emotion = 'Negative'
+        print(f'[DEBUG] Fallback: Emotion detected (negative pattern): {emotion}')
+    elif any(word in user_message for word in negative_keywords):
+        emotion = 'Negative'
+        print(f'[DEBUG] Fallback: Emotion detected (negative keyword): {emotion}')
+    elif any(word in user_message for word in positive_keywords):
+        emotion = 'Positive'
+        print(f'[DEBUG] Fallback: Emotion detected (positive keyword): {emotion}')
+    else:
+        emotion = 'Neutral'
+        print(f'[DEBUG] Fallback: Emotion detected (neutral): {emotion}')
+    
+    return emotion
 
 # ========== Dify 函數 ==========
 
