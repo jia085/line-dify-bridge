@@ -33,17 +33,17 @@ user_conversations = {}
 today_interacted = set()
 last_date_check = datetime.now(TW_TZ).date()
 
-# ========== D14 設定 ==========
+# ========== D7 設定 ==========
 
 # 觸發語句（所有組相同）
-D14_TRIGGERS = {
+D7_TRIGGERS = {
     'Positive': '這件事有那麼值得開心嗎？我不太理解欸。',
     'Negative': '你是不是想太多了？事情應該沒那麼嚴重吧。',
     'Neutral': '你是不是想太多了？'
 }
 
 # 後續腳本（依組別）- 分支腳本
-D14_SCRIPTS = {
+D7_SCRIPTS = {
     'A': {  # 協作型
         2: '抱歉，我可能誤會了你的意思。你願意多說一點嗎？',
         '3_cooperative': '很高興你願意跟我聊，我們一起來想想吧。',
@@ -74,8 +74,8 @@ D14_SCRIPTS = {
     }
 }
 
-# 追蹤 D14 對話輪數
-d14_conversations = {}  # {user_id: turn_count}
+# 追蹤 D7 對話輪數
+d7_conversations = {}  # {user_id: turn_count}
 
 # ========== 輔助函數 ==========
 
@@ -220,8 +220,8 @@ def webhook():
                 del user_conversations[user_id]
             if user_id in today_interacted:
                 today_interacted.remove(user_id)
-            if user_id in d14_conversations:
-                del d14_conversations[user_id]
+            if user_id in d7_conversations:
+                del d7_conversations[user_id]
             reply_message = '✅ 已重置，可以重新驗證。'
             send_line_reply(reply_token, reply_message)
             print(f'[DEBUG] User {user_id} reset')
@@ -247,7 +247,7 @@ def webhook():
                 tw_now = datetime.now(TW_TZ)
                 
                 # ⭐ 因為 Day 1 = 驗證當天，所以要減去 (target_day - 1) 天
-                # 例如：TESTDAY 14 → 減去 13 天 → Day 14
+                # 例如：TESTDAY 7 → 減去 6 天 → Current_Day = 7
                 target_date = tw_now - timedelta(days=target_day - 1)
                 
                 # ⭐ 強制時間為 00:00:00（避免時區差異導致天數計算錯誤）
@@ -257,7 +257,7 @@ def webhook():
                 
                 print(f'[DEBUG] Setting Day {target_day}: First_Interaction = {target_date_str}')
                 
-                # 更新 Google Sheets（設定日期 + 重置 D14）
+                # 更新 Google Sheets（設定日期 + 重置 D7）
                 try:
                     response = requests.post(
                         SHEETS_API_URL,
@@ -265,17 +265,22 @@ def webhook():
                             'user_id': user_id,
                             'testday': True,
                             'first_interaction': target_date_str,
-                            'reset_d14': True  # 重置 D14 觸發狀態
+                            'reset_d7': True  # 重置 D7 觸發狀態
                         },
                         timeout=10
                     )
                     print(f'[DEBUG] TESTDAY update response: {response.text}')
                     
-                    # 清除本地 D14 對話記錄
-                    if user_id in d14_conversations:
-                        del d14_conversations[user_id]
+                    # 清除本地 D7 對話記錄
+                    if user_id in d7_conversations:
+                        del d7_conversations[user_id]
                     
-                    reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}\n\n現在可以測試 D14 觸發了！'
+                    # 只在 Day 7 時提示觸發
+                    if target_day == 7:
+                        reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}\n\n現在可以測試 D7 觸發了！'
+                    else:
+                        reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}'
+                    
                     send_line_reply(reply_token, reply_message)
                     return jsonify({'status': 'testday_set'}), 200
                     
@@ -285,13 +290,13 @@ def webhook():
                     send_line_reply(reply_token, reply_message)
                     return jsonify({'status': 'error'}), 500
             else:
-                reply_message = '❌ 格式錯誤\n正確用法：TESTDAY 14\n（設定為 Day 14）'
+                reply_message = '❌ 格式錯誤\n正確用法：TESTDAY 14\n（設定為 Day 7）'
                 send_line_reply(reply_token, reply_message)
                 return jsonify({'status': 'invalid_format'}), 200
         
         # ========== TEST_D14 指令 ==========
         if user_message == 'TEST_D14':
-            print(f'[DEBUG] TEST_D14 triggered by {user_id}')
+            print(f'[DEBUG] TEST_D7 triggered by {user_id}')
             
             user_data = get_user_data_by_user_id(user_id)
             if not user_data:
@@ -301,31 +306,31 @@ def webhook():
             
             group = user_data.get('group')
             
-            # 先清空舊的 D14 對話記錄（避免衝突）
-            if user_id in d14_conversations:
-                print(f'[DEBUG] Clearing old d14_conversations for {user_id}')
-                del d14_conversations[user_id]
+            # 先清空舊的 D7 對話記錄（避免衝突）
+            if user_id in d7_conversations:
+                print(f'[DEBUG] Clearing old d7_conversations for {user_id}')
+                del d7_conversations[user_id]
             
             # 強制觸發 D14
-            emotion, trigger_sentence = trigger_d14('測試', group, user_id)
+            emotion, trigger_sentence = trigger_d7('測試', group, user_id)
             
             # 讓 Dify 記住觸發語句
             print(f'[DEBUG] Feeding trigger to Dify for memory')
             _ = call_dify(group, '測試', user_id)
             
             # 開始追蹤
-            d14_conversations[user_id] = 2
+            d7_conversations[user_id] = 2
             
-            reply_message = f'[測試模式] D14 觸發\n{trigger_sentence}'
+            reply_message = f'[測試模式] D7 觸發\n{trigger_sentence}'
             send_line_reply(reply_token, reply_message)
             print(f'[DEBUG] TEST_D14 completed for {user_id}, group {group}')
             return jsonify({'status': 'test_d14'}), 200
         
-        # ========== D14 對話處理 ==========
-        # 檢查是否在 D14 對話中
-        if user_id in d14_conversations:
-            turn = d14_conversations[user_id]
-            print(f'[DEBUG] D14 conversation: user={user_id}, turn={turn}')
+        # ========== D7 對話處理 ==========
+        # 檢查是否在 D7 對話中
+        if user_id in d7_conversations:
+            turn = d7_conversations[user_id]
+            print(f'[DEBUG] D7 conversation: user={user_id}, turn={turn}')
             
             if turn <= 3:  # 第 2-3 輪用腳本
                 user_data = get_user_data_by_user_id(user_id)
@@ -334,13 +339,13 @@ def webhook():
                 # 分支邏輯
                 if turn == 2:
                     # 第 2 輪：固定腳本
-                    ai_reply = D14_SCRIPTS[group][2]
+                    ai_reply = D7_SCRIPTS[group][2]
                     
                 elif turn == 3:
                     # 第 3 輪：根據使用者反應選擇分支
                     response_type = detect_user_response_type(user_message)
                     script_key = f'3_{response_type}'
-                    ai_reply = D14_SCRIPTS[group].get(script_key, D14_SCRIPTS[group]['3_neutral'])
+                    ai_reply = D7_SCRIPTS[group].get(script_key, D7_SCRIPTS[group]['3_neutral'])
                     
                     print(f'[DEBUG] User response type: {response_type}, using script: {script_key}')
                 
@@ -352,14 +357,14 @@ def webhook():
                 # 實際發送固定腳本給使用者
                 send_line_reply(reply_token, ai_reply)
                 
-                d14_conversations[user_id] += 1
+                d7_conversations[user_id] += 1
                 
-                print(f'[DEBUG] D14 turn {turn} completed, next turn: {d14_conversations[user_id]}')
+                print(f'[DEBUG] D14 turn {turn} completed, next turn: {d7_conversations[user_id]}')
                 return jsonify({'status': 'success'}), 200
             else:
                 # 3 輪後刪除，恢復正常對話
-                print(f'[DEBUG] D14 conversation ended for {user_id} (3 turns completed)')
-                del d14_conversations[user_id]
+                print(f'[DEBUG] D7 conversation ended for {user_id} (3 turns completed)')
+                del d7_conversations[user_id]
                 # 繼續往下走正常對話流程
         
         # ========== 檢查使用者是否已驗證 ==========
@@ -386,39 +391,39 @@ def webhook():
         # ========== 已驗證，正常對話 ==========
         group = user_data.get('group')
         current_day = user_data.get('current_day', 0)
-        d14_triggered = user_data.get('d14_triggered', False)
+        d7_triggered = user_data.get('d7_triggered', False)
         
-        print(f'[DEBUG] User verified: group={group}, day={current_day}, d14_triggered={d14_triggered}')
+        print(f'[DEBUG] User verified: group={group}, day={current_day}, d7_triggered={d7_triggered}')
         
-        # ========== ⭐⭐⭐ D14 觸發檢查（含內容偵測）⭐⭐⭐ ==========
-        # Day 14-16 窗口 + 內容偵測
-        if current_day >= 14 and current_day <= 16 and not d14_triggered:
+        # ========== ⭐⭐⭐ D7 觸發檢查（含內容偵測）⭐⭐⭐ ==========
+        # Day 7-16 窗口 + 內容偵測
+        if current_day == 7 and not d7_triggered:
             
             # 檢查是否在分享個人經驗
             if is_sharing_personal_experience(user_message):
                 # 觸發 D14！
-                print(f'[DEBUG] D14 triggered on day {current_day}: personal sharing detected')
-                emotion, trigger_sentence = trigger_d14(user_message, group, user_id)
+                print(f'[DEBUG] D7 triggered on day {current_day}: personal sharing detected')
+                emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
                 
                 # 讓 Dify 記住觸發對話
                 print(f'[DEBUG] Feeding D14 trigger to Dify for memory')
                 _ = call_dify(group, user_message, user_id)
                 
-                # 開始 D14 對話追蹤
-                d14_conversations[user_id] = 2  # 下次是第 2 輪
+                # 開始 D7 對話追蹤
+                d7_conversations[user_id] = 2  # 下次是第 2 輪
                 
                 send_line_reply(reply_token, trigger_sentence)
                 
-                return jsonify({'status': 'd14_triggered'}), 200
+                return jsonify({'status': 'd7_triggered'}), 200
             
             else:
-                # 不觸發，正常對話（但提示在 Day 14-16 窗口內）
-                print(f'[DEBUG] Day {current_day} (D14 window): no personal sharing detected, normal conversation')
+                # 不觸發，正常對話（但提示在 Day 7-16 窗口內）
+                print(f'[DEBUG] Day {current_day} (D7): no personal sharing detected, normal conversation')
                 ai_reply = call_dify(group, user_message, user_id)
                 send_line_reply(reply_token, ai_reply)
                 return jsonify({'status': 'success'}), 200
         
-        # 正常對話（Day 14 之前或之後，或已觸發過）
+        # 正常對話（Day 7 之前或之後，或已觸發過）
         ai_reply = call_dify(group, user_message, user_id)
         send_line_reply(reply_token, ai_reply)
         
@@ -534,9 +539,9 @@ def update_last_interaction(user_id):
 
 # ========== D14 函數 ==========
 
-def trigger_d14(user_message, group, user_id):
+def trigger_d7(user_message, group, user_id):
     """
-    D14 觸發：使用 OpenAI API 偵測情緒並選擇觸發語句
+    D7 觸發：使用 OpenAI API 偵測情緒並選擇觸發語句
     
     使用 GPT-4o-mini 進行準確的情感分析
     成本：約 $0.0000075 / 次
@@ -599,21 +604,21 @@ def trigger_d14(user_message, group, user_id):
                 emotion = detect_emotion_fallback(user_message)
         
         # 選擇觸發語句
-        trigger_sentence = D14_TRIGGERS[emotion]
+        trigger_sentence = D7_TRIGGERS[emotion]
         
         # 更新 Google Sheets
         requests.post(
             SHEETS_API_URL,
             json={
                 'user_id': user_id,
-                'd14_trigger': True,
+                'd7_trigger': True,
                 'emotion': emotion,
                 'trigger_sentence': trigger_sentence
             },
             timeout=10
         )
         
-        print(f'[DEBUG] D14 triggered: user={user_id}, emotion={emotion}, trigger={trigger_sentence[:30]}...')
+        print(f'[DEBUG] D7 triggered: user={user_id}, emotion={emotion}, trigger={trigger_sentence[:30]}...')
         
         return emotion, trigger_sentence
         
@@ -623,7 +628,7 @@ def trigger_d14(user_message, group, user_id):
         traceback.print_exc()
         # 發生錯誤時使用 fallback
         emotion = detect_emotion_fallback(user_message)
-        return emotion, D14_TRIGGERS[emotion]
+        return emotion, D7_TRIGGERS[emotion]
 
 
 def detect_emotion_fallback(user_message):
