@@ -79,6 +79,46 @@ d7_conversations = {}  # {user_id: turn_count}
 
 # ========== 輔助函數 ==========
 
+def log_conversation(user_id, participant_code, message_type, message_content, is_script=False, script_type='', current_day=None):
+    """
+    記錄對話到 Google Sheets Conversation_Logs
+    
+    參數：
+    - user_id: LINE User ID
+    - participant_code: 受試者代碼（手機末5碼）
+    - message_type: 'user' 或 'ai'
+    - message_content: 訊息內容
+    - is_script: 是否為固定腳本（True/False）
+    - script_type: 'd7_trigger', 'd7_turn2', 'd7_turn3', 'normal'
+    - current_day: 當前天數
+    """
+    try:
+        tw_now = datetime.now(TW_TZ).strftime('%Y-%m-%d %H:%M:%S')
+        
+        response = requests.post(
+            SHEETS_API_URL,
+            json={
+                'log_conversation': True,
+                'user_id': user_id,
+                'participant_code': participant_code,
+                'timestamp': tw_now,
+                'message_type': message_type,
+                'message_content': message_content,
+                'is_script': is_script,
+                'script_type': script_type,
+                'current_day': current_day
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            print(f'[DEBUG] Conversation logged: {message_type} - {message_content[:30]}...')
+        else:
+            print(f'[WARNING] Failed to log conversation: {response.status_code}')
+            
+    except Exception as e:
+        print(f'[ERROR] Log conversation error: {str(e)}')
+
 def is_sharing_personal_experience(user_message):
     """
     偵測使用者是否在分享個人經驗或情緒
@@ -349,17 +389,39 @@ def webhook():
                     
                     print(f'[DEBUG] User response type: {response_type}, using script: {script_key}')
                 
-                # 呼叫 Dify 但不用回覆（讓 Dify 記住對話）
-                print(f'[DEBUG] Feeding turn {turn} to Dify for memory')
+                # 取得受試者資訊
+                participant_code = user_data.get('code', '')
+                current_day = user_data.get('current_day', '')
+                
+                # 決定 script_type
+                if turn == 2:
+                    script_type = 'd7_turn2'
+                else:
+                    script_type = 'd7_turn3'
+                
+                # ⭐⭐⭐ 記錄使用者訊息
+                log_conversation(user_id, participant_code, 'user', user_message, False, '', current_day)
+                
+                # ⭐⭐⭐ 記錄 AI 固定腳本
+                log_conversation(user_id, participant_code, 'ai', ai_reply, True, script_type, current_day)
+                
+                # 呼叫 Dify（讓它記住使用者訊息，但我們不用它的回應）
+                print(f'[DEBUG] Calling Dify to maintain conversation memory (turn {turn})')
                 dify_reply = call_dify(group, user_message, user_id)
-                print(f'[DEBUG] Dify generated: {dify_reply[:50]}... (not used)')
+                print(f'[DEBUG] Dify response ignored: {dify_reply[:50]}...')
+                
+                # 再呼叫一次 Dify，模擬「AI 回覆了固定腳本」
+                print(f'[DEBUG] Feeding AI script back to Dify: {ai_reply[:30]}...')
+                mock_user_msg = f"[以下是我的回應]：{ai_reply}"
+                call_dify(group, mock_user_msg, user_id)
+                print(f'[DEBUG] AI script added to Dify memory')
                 
                 # 實際發送固定腳本給使用者
                 send_line_reply(reply_token, ai_reply)
                 
                 d7_conversations[user_id] += 1
                 
-                print(f'[DEBUG] D14 turn {turn} completed, next turn: {d7_conversations[user_id]}')
+                print(f'[DEBUG] D7 turn {turn} completed, next turn: {d7_conversations[user_id]}')
                 return jsonify({'status': 'success'}), 200
             else:
                 # 3 輪後刪除，恢復正常對話
@@ -405,8 +467,15 @@ def webhook():
                 print(f'[DEBUG] D7 triggered on day {current_day}: personal sharing detected')
                 emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
                 
+                # ⭐ 記錄使用者訊息
+                participant_code = user_data.get('code', '')
+                log_conversation(user_id, participant_code, 'user', user_message, False, '', current_day)
+                
+                # ⭐ 記錄 AI 觸發語句
+                log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
+                
                 # 讓 Dify 記住觸發對話
-                print(f'[DEBUG] Feeding D14 trigger to Dify for memory')
+                print(f'[DEBUG] Feeding D7 trigger to Dify for memory')
                 _ = call_dify(group, user_message, user_id)
                 
                 # 開始 D7 對話追蹤
@@ -417,14 +486,33 @@ def webhook():
                 return jsonify({'status': 'd7_triggered'}), 200
             
             else:
-                # 不觸發，正常對話（但提示在 Day 7-16 窗口內）
+                # 不觸發，正常對話（但提示在 Day 7 窗口內）
                 print(f'[DEBUG] Day {current_day} (D7): no personal sharing detected, normal conversation')
+                
+                # ⭐ 記錄使用者訊息
+                participant_code = user_data.get('code', '')
+                log_conversation(user_id, participant_code, 'user', user_message, False, 'normal', current_day)
+                
+                # 呼叫 Dify
                 ai_reply = call_dify(group, user_message, user_id)
+                
+                # ⭐ 記錄 AI 回應
+                log_conversation(user_id, participant_code, 'ai', ai_reply, False, 'normal', current_day)
+                
                 send_line_reply(reply_token, ai_reply)
                 return jsonify({'status': 'success'}), 200
         
         # 正常對話（Day 7 之前或之後，或已觸發過）
+        # ⭐ 記錄使用者訊息
+        participant_code = user_data.get('code', '')
+        log_conversation(user_id, participant_code, 'user', user_message, False, 'normal', current_day)
+        
+        # 呼叫 Dify
         ai_reply = call_dify(group, user_message, user_id)
+        
+        # ⭐ 記錄 AI 回應
+        log_conversation(user_id, participant_code, 'ai', ai_reply, False, 'normal', current_day)
+        
         send_line_reply(reply_token, ai_reply)
         
         return jsonify({'status': 'success'}), 200
@@ -606,7 +694,11 @@ def trigger_d7(user_message, group, user_id):
         # 選擇觸發語句
         trigger_sentence = D7_TRIGGERS[emotion]
         
-        # 更新 Google Sheets
+        # ⭐⭐⭐ 記錄對話到 Google Sheets ⭐⭐⭐
+        # 註：這裡需要從 user_id 取得 participant_code 和 current_day
+        # 會在主流程中一起記錄，這裡先不記錄
+        
+        # 更新 Google Sheets（D7 觸發狀態）
         requests.post(
             SHEETS_API_URL,
             json={
