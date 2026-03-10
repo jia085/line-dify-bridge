@@ -446,7 +446,7 @@ def webhook():
                     send_line_reply(reply_token, reply_message)
                     return jsonify({'status': 'verification failed'}), 200
             else:
-                reply_message = '你好！請輸入您的手機末5碼以開始實驗。'
+                reply_message = '你好！我是 Alex。請輸入您的手機末5碼以開始實驗。'
                 send_line_reply(reply_token, reply_message)
                 return jsonify({'status': 'awaiting verification'}), 200
         
