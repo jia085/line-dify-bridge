@@ -34,6 +34,8 @@ today_interacted = set()
 last_date_check = datetime.now(TW_TZ).date()
 
 # ========== D7 設定 ==========
+# ⭐ 修改：改為 Day 8 觸發
+CONFLICT_DAY = 8  # 衝突觸發日（原本是 7，現在改成 8）
 
 # 觸發語句（所有組相同）
 D7_TRIGGERS = {
@@ -121,80 +123,116 @@ def log_conversation(user_id, participant_code, message_type, message_content, i
 
 def is_sharing_personal_experience(user_message):
     """
-    偵測使用者是否在分享個人經驗或情緒
+    ⭐ 超放寬版：大幅降低觸發門檻
     
-    放寬版邏輯（解決沒有「我」但明顯在分享的情況）：
-    1. 有「我」+ 情緒/事件 → 觸發
-    2. 沒有「我」但有強烈情緒詞 → 觸發
-    3. 沒有「我」但同時有情緒+事件 → 觸發
+    只要符合以下任一條件就觸發：
+    1. 訊息長度 >= 10 字（排除「嗨」「在嗎」等）
+    2. 包含任何情緒相關詞
+    3. 包含任何時間詞
+    4. 包含任何事件詞
+    5. 包含語氣詞（哈哈、唉、嘆氣等）
+    6. 包含第一人稱（我）
     
-    目的：提高召回率，避免漏掉真實的分享
+    基本上除了極短訊息，都會觸發
     """
     
-    # 太短不算（可能只是「我在」「好喔」）
+    # 太短不算（< 5 字）
     if len(user_message) < 5:
+        print(f'[DEBUG] Message too short ({len(user_message)} chars), skip')
         return False
     
-    # 情緒關鍵字（擴充版）
+    # ⭐ 策略 1：訊息夠長就觸發（>= 10 字）
+    if len(user_message) >= 10:
+        print(f'[DEBUG] Sharing detected (long message: {len(user_message)} chars)')
+        return True
+    
+    # ⭐ 策略 2：超廣的關鍵字庫
+    
+    # 情緒詞（大幅擴充）
     emotion_keywords = [
-        # 正向情緒
-        '開心', '高興', '快樂', '爽', '棒', '讚', '興奮', '期待', '滿意', '舒服',
-        # 負向情緒
-        '難過', '傷心', '生氣', '煩', '累', '壓力', '不爽', '慘', '糟', '痛苦',
+        # 正向
+        '開心', '高興', '快樂', '爽', '棒', '讚', '好', '不錯', '可以', '還行',
+        '興奮', '期待', '滿意', '舒服', '幸福', '美好', '順利',
+        # 負向
+        '累', '煩', '難過', '傷心', '生氣', '壓力', '不爽', '慘', '糟', '痛苦',
         '焦慮', '緊張', '失望', '後悔', '害怕', '擔心', '煩惱', '沮喪', '無聊',
-        '不開心', '不滿意', '難受', '辛苦', '鬱悶', '煩躁', '不舒服'
+        '不開心', '不滿意', '難受', '辛苦', '鬱悶', '煩躁', '不舒服',
+        # 中性/程度
+        '還好', '普通', '一般', '有點', '稍微', '不太', '蠻', '很', '超',
+        '麻煩', '忙', '趕', '閒'
     ]
     
-    # 強烈情緒詞（即使沒有「我」也算分享）
-    strong_emotion_keywords = [
-        '好累', '超累', '很累', '累死', '累爆',
-        '好煩', '超煩', '很煩', '煩死',
-        '好開心', '超開心', '很開心',
-        '好難過', '超難過', '很難過',
-        '不開心', '不爽', '難受', '痛苦', '辛苦',
-        '好慘', '好糟', '太累', '太煩'
+    # 時間詞（大幅擴充）
+    time_keywords = [
+        '今天', '昨天', '明天', '剛才', '剛剛', '最近', '這週', '這個月',
+        '早上', '中午', '下午', '晚上', '現在', '等等', '稍後',
+        '前天', '後天', '上週', '上個月', '去年',
+        '剛', '才', '就', '已經', '快要', '正在'
     ]
     
-    # 事件/經驗關鍵字（擴充版）
+    # 事件詞（大幅擴充）
     event_keywords = [
-        # 時間
-        '今天', '昨天', '剛才', '最近', '這週', '這個月', '早上', '下午', '晚上', '剛剛',
-        # 動作/事件
-        '發生', '遇到', '碰到', '經歷', '覺得', '感覺', '想到', '遇見',
-        # 人際互動
-        '跟', '和', '被', '給', '讓', '朋友', '家人', '同事', '老闆', '教授', '老師',
-        # 情境
-        '上課', '工作', '學校', '公司', '論文', '報告', '考試'
+        # 地點/場所
+        '家', '學校', '公司', '圖書館', '教室', '宿舍', '房間',
+        # 活動
+        '上課', '工作', '寫', '做', '看', '吃', '睡', '玩', '讀', '聽',
+        '論文', '報告', '作業', '考試', '會議', '討論',
+        # 人際
+        '朋友', '同學', '老師', '教授', '老闆', '同事', '家人',
+        # 動作
+        '去', '來', '回', '出', '進', '買', '拿', '想', '說', '聊',
+        '出門', '回家', '起床', '睡覺', '吃飯', '開會'
     ]
     
-    # 檢查各種情況
-    has_i = '我' in user_message
+    # 語氣詞（新增！）
+    tone_keywords = [
+        '哈哈', '呵呵', '嘻嘻', '哎', '唉', '喔', '嗯', '耶', '啊', '欸',
+        '吧', '嗎', '呢', '齁', '啦', '囉', '哦'
+    ]
+    
+    # 第一人稱（新增！）
+    first_person = ['我', '我的', '我在', '我們', '咱們']
+    
+    # ⭐ 檢查是否包含任何關鍵字
     has_emotion = any(word in user_message for word in emotion_keywords)
+    has_time = any(word in user_message for word in time_keywords)
     has_event = any(word in user_message for word in event_keywords)
-    has_strong_emotion = any(word in user_message for word in strong_emotion_keywords)
+    has_tone = any(word in user_message for word in tone_keywords)
+    has_first_person = any(word in user_message for word in first_person)
     
-    # 情況 1：有「我」+ （情緒 or 事件）
-    if has_i and (has_emotion or has_event):
-        print(f'[DEBUG] Sharing detected (Type 1): has_i=True, emotion={has_emotion}, event={has_event}')
+    # ⭐ 只要有任何一個就觸發！
+    if has_emotion:
+        print(f'[DEBUG] Sharing detected (has emotion keyword)')
         return True
     
-    # 情況 2：沒有「我」但有強烈情緒（很明顯在表達情緒）
-    if has_strong_emotion:
-        print(f'[DEBUG] Sharing detected (Type 2): strong_emotion={has_strong_emotion}')
+    if has_time:
+        print(f'[DEBUG] Sharing detected (has time keyword)')
         return True
     
-    # 情況 3：沒有「我」但同時有情緒+事件（很明顯在分享經歷）
-    if has_emotion and has_event:
-        print(f'[DEBUG] Sharing detected (Type 3): emotion + event')
+    if has_event:
+        print(f'[DEBUG] Sharing detected (has event keyword)')
         return True
     
-    print(f'[DEBUG] No sharing detected: has_i={has_i}, emotion={has_emotion}, event={has_event}, strong={has_strong_emotion}')
+    if has_tone:
+        print(f'[DEBUG] Sharing detected (has tone keyword)')
+        return True
+    
+    if has_first_person:
+        print(f'[DEBUG] Sharing detected (has first person)')
+        return True
+    
+    # 如果都沒有，但訊息 >= 8 字，也觸發
+    if len(user_message) >= 8:
+        print(f'[DEBUG] Sharing detected (message >= 8 chars)')
+        return True
+    
+    print(f'[DEBUG] No sharing detected')
     return False
 
 
 def detect_user_response_type(user_message):
     """
-    偵測使用者的反應類型（用於 D14 第 3 輪分支）
+    偵測使用者的反應類型（用於 D7 第 3 輪分支）
     返回：'cooperative', 'refuse', 'question', 'neutral'
     """
     # 合作關鍵字
@@ -287,7 +325,7 @@ def webhook():
                 tw_now = datetime.now(TW_TZ)
                 
                 # ⭐ 因為 Day 1 = 驗證當天，所以要減去 (target_day - 1) 天
-                # 例如：TESTDAY 7 → 減去 6 天 → Current_Day = 7
+                # 例如：TESTDAY 8 → 減去 7 天 → Current_Day = 8
                 target_date = tw_now - timedelta(days=target_day - 1)
                 
                 # ⭐ 強制時間為 00:00:00（避免時區差異導致天數計算錯誤）
@@ -315,9 +353,9 @@ def webhook():
                     if user_id in d7_conversations:
                         del d7_conversations[user_id]
                     
-                    # 只在 Day 7 時提示觸發
-                    if target_day == 7:
-                        reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}\n\n現在可以測試 D7 觸發了！'
+                    # ⭐ 修改：提示改為 Day 8
+                    if target_day == CONFLICT_DAY:
+                        reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}\n\n現在可以測試衝突觸發了！（Day {CONFLICT_DAY}）'
                     else:
                         reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}'
                     
@@ -330,12 +368,12 @@ def webhook():
                     send_line_reply(reply_token, reply_message)
                     return jsonify({'status': 'error'}), 500
             else:
-                reply_message = '❌ 格式錯誤\n正確用法：TESTDAY 14\n（設定為 Day 7）'
+                reply_message = f'❌ 格式錯誤\n正確用法：TESTDAY 8\n（設定為 Day {CONFLICT_DAY}）'
                 send_line_reply(reply_token, reply_message)
                 return jsonify({'status': 'invalid_format'}), 200
         
-        # ========== TEST_D14 指令 ==========
-        if user_message == 'TEST_D14':
+        # ========== TEST_D7 指令 ==========
+        if user_message == 'TEST_D7':
             print(f'[DEBUG] TEST_D7 triggered by {user_id}')
             
             user_data = get_user_data_by_user_id(user_id)
@@ -351,7 +389,7 @@ def webhook():
                 print(f'[DEBUG] Clearing old d7_conversations for {user_id}')
                 del d7_conversations[user_id]
             
-            # 強制觸發 D14
+            # 強制觸發 D7
             emotion, trigger_sentence = trigger_d7('測試', group, user_id)
             
             # 讓 Dify 記住觸發語句
@@ -361,10 +399,10 @@ def webhook():
             # 開始追蹤
             d7_conversations[user_id] = 2
             
-            reply_message = f'[測試模式] D7 觸發\n{trigger_sentence}'
+            reply_message = f'[測試模式] 衝突觸發\n{trigger_sentence}'
             send_line_reply(reply_token, reply_message)
-            print(f'[DEBUG] TEST_D14 completed for {user_id}, group {group}')
-            return jsonify({'status': 'test_d14'}), 200
+            print(f'[DEBUG] TEST_D7 completed for {user_id}, group {group}')
+            return jsonify({'status': 'test_d7'}), 200
         
         # ========== D7 對話處理 ==========
         # 檢查是否在 D7 對話中
@@ -457,14 +495,13 @@ def webhook():
         
         print(f'[DEBUG] User verified: group={group}, day={current_day}, d7_triggered={d7_triggered}')
         
-        # ========== ⭐⭐⭐ D7 觸發檢查（含內容偵測）⭐⭐⭐ ==========
-        # Day 7-16 窗口 + 內容偵測
-        if current_day == 7 and not d7_triggered:
+        # ========== ⭐⭐⭐ 衝突觸發檢查（改為 Day 8）⭐⭐⭐ ==========
+        if current_day == CONFLICT_DAY and not d7_triggered:
             
-            # 檢查是否在分享個人經驗
+            # 檢查是否在分享個人經驗（使用超放寬版）
             if is_sharing_personal_experience(user_message):
-                # 觸發 D14！
-                print(f'[DEBUG] D7 triggered on day {current_day}: personal sharing detected')
+                # 觸發衝突！
+                print(f'[DEBUG] Conflict triggered on Day {CONFLICT_DAY}: personal sharing detected')
                 emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
                 
                 # ⭐ 記錄使用者訊息
@@ -475,7 +512,7 @@ def webhook():
                 log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
                 
                 # 讓 Dify 記住觸發對話
-                print(f'[DEBUG] Feeding D7 trigger to Dify for memory')
+                print(f'[DEBUG] Feeding conflict trigger to Dify for memory')
                 _ = call_dify(group, user_message, user_id)
                 
                 # 開始 D7 對話追蹤
@@ -483,11 +520,11 @@ def webhook():
                 
                 send_line_reply(reply_token, trigger_sentence)
                 
-                return jsonify({'status': 'd7_triggered'}), 200
+                return jsonify({'status': 'conflict_triggered'}), 200
             
             else:
-                # 不觸發，正常對話（但提示在 Day 7 窗口內）
-                print(f'[DEBUG] Day {current_day} (D7): no personal sharing detected, normal conversation')
+                # 不觸發，正常對話
+                print(f'[DEBUG] Day {current_day}: no personal sharing detected, normal conversation')
                 
                 # ⭐ 記錄使用者訊息
                 participant_code = user_data.get('code', '')
@@ -502,7 +539,7 @@ def webhook():
                 send_line_reply(reply_token, ai_reply)
                 return jsonify({'status': 'success'}), 200
         
-        # 正常對話（Day 7 之前或之後，或已觸發過）
+        # 正常對話（Day 8 之前或之後，或已觸發過）
         # ⭐ 記錄使用者訊息
         participant_code = user_data.get('code', '')
         log_conversation(user_id, participant_code, 'user', user_message, False, 'normal', current_day)
@@ -625,7 +662,7 @@ def update_last_interaction(user_id):
     except Exception as e:
         print(f'[ERROR] Update sheets error: {str(e)}')
 
-# ========== D14 函數 ==========
+# ========== D7 函數 ==========
 
 def trigger_d7(user_message, group, user_id):
     """
@@ -694,10 +731,6 @@ def trigger_d7(user_message, group, user_id):
         # 選擇觸發語句
         trigger_sentence = D7_TRIGGERS[emotion]
         
-        # ⭐⭐⭐ 記錄對話到 Google Sheets ⭐⭐⭐
-        # 註：這裡需要從 user_id 取得 participant_code 和 current_day
-        # 會在主流程中一起記錄，這裡先不記錄
-        
         # 更新 Google Sheets（D7 觸發狀態）
         requests.post(
             SHEETS_API_URL,
@@ -710,12 +743,12 @@ def trigger_d7(user_message, group, user_id):
             timeout=10
         )
         
-        print(f'[DEBUG] D7 triggered: user={user_id}, emotion={emotion}, trigger={trigger_sentence[:30]}...')
+        print(f'[DEBUG] Conflict triggered: user={user_id}, emotion={emotion}, trigger={trigger_sentence[:30]}...')
         
         return emotion, trigger_sentence
         
     except Exception as e:
-        print(f'[ERROR] D14 trigger error: {str(e)}')
+        print(f'[ERROR] D7 trigger error: {str(e)}')
         import traceback
         traceback.print_exc()
         # 發生錯誤時使用 fallback
@@ -726,7 +759,7 @@ def trigger_d7(user_message, group, user_id):
 def detect_emotion_fallback(user_message):
     """
     Fallback 情緒偵測（當 OpenAI API 不可用時）
-    使用方案 A+B 關鍵字方法
+    使用關鍵字方法
     """
     # 否定詞組合
     negative_patterns = [
