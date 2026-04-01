@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import sqlite3
 from datetime import datetime, timedelta
 import pytz
 
@@ -26,12 +27,8 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 # Google Sheets API URL
 SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
 
-# 儲存對話 ID（對話記憶）
-user_conversations = {}
-
-# 儲存今天已互動的使用者
-today_interacted = set()
-last_date_check = datetime.now(TW_TZ).date()
+# 本地狀態儲存（避免重啟後遺失）
+STATE_DB_PATH = os.environ.get('STATE_DB_PATH', 'state_alex.db')
 
 # ========== D7 設定 ==========
 # ⭐ 修改：改為 Day 8 觸發
@@ -76,8 +73,81 @@ D7_SCRIPTS = {
     }
 }
 
-# 追蹤 D7 對話輪數
-d7_conversations = {}  # {user_id: turn_count}
+# ========== 狀態儲存函數 ==========
+
+def _state_conn():
+    return sqlite3.connect(STATE_DB_PATH)
+
+def init_state_store():
+    with _state_conn() as conn:
+        conn.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS bot_state (
+                user_id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                d7_turn INTEGER NOT NULL DEFAULT 0,
+                last_interaction_date TEXT
+            )
+            '''
+        )
+
+def get_conversation_id(user_id):
+    with _state_conn() as conn:
+        row = conn.execute(
+            'SELECT conversation_id FROM bot_state WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+    if row and row[0]:
+        return row[0]
+    return None
+
+def set_conversation_id(user_id, conversation_id):
+    with _state_conn() as conn:
+        conn.execute(
+            '''
+            INSERT INTO bot_state (user_id, conversation_id)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET conversation_id = excluded.conversation_id
+            ''',
+            (user_id, conversation_id)
+        )
+
+def get_d7_turn(user_id):
+    with _state_conn() as conn:
+        row = conn.execute(
+            'SELECT d7_turn FROM bot_state WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+    return int(row[0]) if row and row[0] else 0
+
+def set_d7_turn(user_id, turn):
+    with _state_conn() as conn:
+        conn.execute(
+            '''
+            INSERT INTO bot_state (user_id, d7_turn)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET d7_turn = excluded.d7_turn
+            ''',
+            (user_id, turn)
+        )
+
+def clear_d7_turn(user_id):
+    set_d7_turn(user_id, 0)
+
+def clear_user_state(user_id):
+    with _state_conn() as conn:
+        conn.execute('DELETE FROM bot_state WHERE user_id = ?', (user_id,))
+
+def _parse_json_response(response, source):
+    if response.status_code >= 400:
+        raise RuntimeError(f'{source} API error: {response.status_code} {response.text[:200]}')
+    try:
+        return response.json()
+    except ValueError as e:
+        raise RuntimeError(f'{source} API invalid JSON: {str(e)}')
+
+# 先建立本地狀態表
+init_state_store()
 
 # ========== 輔助函數 ==========
 
@@ -272,38 +342,51 @@ def health():
 def webhook():
     if request.method == 'GET':
         return 'Webhook endpoint is ready', 200
-    
+
+    data = request.get_json(silent=True) or {}
+    events = data.get('events', [])
+
+    if not events:
+        return jsonify({'status': 'no events'}), 200
+
+    results = []
+    for event in events:
+        try:
+            result = handle_message_event(event)
+            results.append(result)
+        except Exception as e:
+            print(f'[ERROR] Event processing error: {str(e)}')
+            import traceback
+            traceback.print_exc()
+            results.append({'status': 'error', 'message': str(e)})
+
+    if len(results) == 1:
+        return jsonify(results[0]), 200
+    return jsonify({'status': 'batch_processed', 'results': results}), 200
+
+def handle_message_event(event):
+    if event.get('type') != 'message' or event.get('message', {}).get('type') != 'text':
+        return {'status': 'ignored'}
+
+    user_message = event.get('message', {}).get('text', '').strip()
+    reply_token = event.get('replyToken')
+    user_id = event.get('source', {}).get('userId')
+
+    if not reply_token or not user_id:
+        return {'status': 'ignored'}
+
+    print(f'[DEBUG] Received message: {user_message} from {user_id}')
+
     try:
-        data = request.json
-        events = data.get('events', [])
-        
-        if not events:
-            return jsonify({'status': 'no events'}), 200
-        
-        event = events[0]
-        
-        if event['type'] != 'message' or event['message']['type'] != 'text':
-            return jsonify({'status': 'ignored'}), 200
-        
-        user_message = event['message']['text'].strip()
-        reply_token = event['replyToken']
-        user_id = event['source']['userId']
-        
-        print(f'[DEBUG] Received message: {user_message} from {user_id}')
         
         # ========== RESET 指令 ==========
         if user_message == 'RESET':
             clear_user_id_from_sheets(user_id)
-            if user_id in user_conversations:
-                del user_conversations[user_id]
-            if user_id in today_interacted:
-                today_interacted.remove(user_id)
-            if user_id in d7_conversations:
-                del d7_conversations[user_id]
+            clear_user_state(user_id)
             reply_message = '✅ 已重置，可以重新驗證。'
             send_line_reply(reply_token, reply_message)
             print(f'[DEBUG] User {user_id} reset')
-            return jsonify({'status': 'reset'}), 200
+            return {'status': 'reset'}
         
         # ========== TESTDAY 指令（快速測試）==========
         if user_message.startswith('TESTDAY'):
@@ -314,7 +397,7 @@ def webhook():
             if not user_data:
                 reply_message = '❌ 請先驗證（輸入手機末5碼）'
                 send_line_reply(reply_token, reply_message)
-                return jsonify({'status': 'not_verified'}), 200
+                return {'status': 'not_verified'}
             
             # 解析天數
             parts = user_message.split()
@@ -337,7 +420,7 @@ def webhook():
                 
                 # 更新 Google Sheets（設定日期 + 重置 D7）
                 try:
-                    response = requests.post(
+                    requests.post(
                         SHEETS_API_URL,
                         json={
                             'user_id': user_id,
@@ -347,11 +430,10 @@ def webhook():
                         },
                         timeout=10
                     )
-                    print(f'[DEBUG] TESTDAY update response: {response.text}')
+                    print(f'[DEBUG] TESTDAY update response: success')
                     
                     # 清除本地 D7 對話記錄
-                    if user_id in d7_conversations:
-                        del d7_conversations[user_id]
+                    clear_d7_turn(user_id)
                     
                     # ⭐ 修改：提示改為 Day 8
                     if target_day == CONFLICT_DAY:
@@ -360,17 +442,17 @@ def webhook():
                         reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}'
                     
                     send_line_reply(reply_token, reply_message)
-                    return jsonify({'status': 'testday_set'}), 200
+                    return {'status': 'testday_set'}
                     
                 except Exception as e:
                     print(f'[ERROR] TESTDAY failed: {str(e)}')
                     reply_message = f'❌ 設定失敗：{str(e)}'
                     send_line_reply(reply_token, reply_message)
-                    return jsonify({'status': 'error'}), 500
+                    return {'status': 'error'}
             else:
                 reply_message = f'❌ 格式錯誤\n正確用法：TESTDAY 8\n（設定為 Day {CONFLICT_DAY}）'
                 send_line_reply(reply_token, reply_message)
-                return jsonify({'status': 'invalid_format'}), 200
+                return {'status': 'invalid_format'}
         
         # ========== TEST_D7 指令 ==========
         if user_message == 'TEST_D7':
@@ -380,14 +462,14 @@ def webhook():
             if not user_data:
                 reply_message = '請先驗證（輸入手機末5碼）'
                 send_line_reply(reply_token, reply_message)
-                return jsonify({'status': 'not_verified'}), 200
+                return {'status': 'not_verified'}
             
             group = user_data.get('group')
             
             # 先清空舊的 D7 對話記錄（避免衝突）
-            if user_id in d7_conversations:
-                print(f'[DEBUG] Clearing old d7_conversations for {user_id}')
-                del d7_conversations[user_id]
+            if get_d7_turn(user_id) > 0:
+                print(f'[DEBUG] Clearing old d7 turn for {user_id}')
+                clear_d7_turn(user_id)
             
             # 強制觸發 D7
             emotion, trigger_sentence = trigger_d7('測試', group, user_id)
@@ -397,17 +479,17 @@ def webhook():
             _ = call_dify(group, '測試', user_id)
             
             # 開始追蹤
-            d7_conversations[user_id] = 2
+            set_d7_turn(user_id, 2)
             
             reply_message = f'[測試模式] 衝突觸發\n{trigger_sentence}'
             send_line_reply(reply_token, reply_message)
             print(f'[DEBUG] TEST_D7 completed for {user_id}, group {group}')
-            return jsonify({'status': 'test_d7'}), 200
+            return {'status': 'test_d7'}
         
         # ========== D7 對話處理 ==========
         # 檢查是否在 D7 對話中
-        if user_id in d7_conversations:
-            turn = d7_conversations[user_id]
+        turn = get_d7_turn(user_id)
+        if turn > 0:
             print(f'[DEBUG] D7 conversation: user={user_id}, turn={turn}')
             
             if turn <= 3:  # 第 2-3 輪用腳本
@@ -457,14 +539,14 @@ def webhook():
                 # 實際發送固定腳本給使用者
                 send_line_reply(reply_token, ai_reply)
                 
-                d7_conversations[user_id] += 1
+                set_d7_turn(user_id, turn + 1)
                 
-                print(f'[DEBUG] D7 turn {turn} completed, next turn: {d7_conversations[user_id]}')
-                return jsonify({'status': 'success'}), 200
+                print(f'[DEBUG] D7 turn {turn} completed, next turn: {turn + 1}')
+                return {'status': 'success'}
             else:
                 # 3 輪後刪除，恢復正常對話
                 print(f'[DEBUG] D7 conversation ended for {user_id} (3 turns completed)')
-                del d7_conversations[user_id]
+                clear_d7_turn(user_id)
                 # 繼續往下走正常對話流程
         
         # ========== 檢查使用者是否已驗證 ==========
@@ -478,15 +560,15 @@ def webhook():
                     update_user_id_in_sheets(user_message, user_id)
                     reply_message = f'✅ 驗證成功！歡迎加入實驗。'
                     send_line_reply(reply_token, reply_message)
-                    return jsonify({'status': 'verification success'}), 200
+                    return {'status': 'verification success'}
                 else:
                     reply_message = '❌ 查無此代碼，請確認您的手機末5碼是否正確。'
                     send_line_reply(reply_token, reply_message)
-                    return jsonify({'status': 'verification failed'}), 200
+                    return {'status': 'verification failed'}
             else:
                 reply_message = '你好！我是 Alex。請輸入您的手機末5碼以開始實驗。'
                 send_line_reply(reply_token, reply_message)
-                return jsonify({'status': 'awaiting verification'}), 200
+                return {'status': 'awaiting verification'}
         
         # ========== 已驗證，正常對話 ==========
         group = user_data.get('group')
@@ -516,11 +598,11 @@ def webhook():
                 _ = call_dify(group, user_message, user_id)
                 
                 # 開始 D7 對話追蹤
-                d7_conversations[user_id] = 2  # 下次是第 2 輪
+                set_d7_turn(user_id, 2)  # 下次是第 2 輪
                 
                 send_line_reply(reply_token, trigger_sentence)
                 
-                return jsonify({'status': 'conflict_triggered'}), 200
+                return {'status': 'conflict_triggered'}
             
             else:
                 # 不觸發，正常對話
@@ -537,7 +619,7 @@ def webhook():
                 log_conversation(user_id, participant_code, 'ai', ai_reply, False, 'normal', current_day)
                 
                 send_line_reply(reply_token, ai_reply)
-                return jsonify({'status': 'success'}), 200
+                return {'status': 'success'}
         
         # 正常對話（Day 8 之前或之後，或已觸發過）
         # ⭐ 記錄使用者訊息
@@ -552,13 +634,13 @@ def webhook():
         
         send_line_reply(reply_token, ai_reply)
         
-        return jsonify({'status': 'success'}), 200
+        return {'status': 'success'}
         
     except Exception as e:
-        print(f'[ERROR] Webhook error: {str(e)}')
+        print(f'[ERROR] Message event error: {str(e)}')
         import traceback
         traceback.print_exc()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return {'status': 'error', 'message': str(e)}
 
 # ========== Google Sheets 函數 ==========
 
@@ -566,7 +648,7 @@ def query_google_sheets_by_code(code):
     """用手機碼查詢"""
     try:
         response = requests.get(f'{SHEETS_API_URL}?code={code}', timeout=10)
-        data = response.json()
+        data = _parse_json_response(response, 'Google Sheets')
         if data.get('found'):
             return data
         return None
@@ -578,7 +660,7 @@ def get_user_data_by_user_id(user_id):
     """用 User ID 查詢"""
     try:
         response = requests.get(f'{SHEETS_API_URL}?user_id={user_id}', timeout=10)
-        data = response.json()
+        data = _parse_json_response(response, 'Google Sheets')
         if data.get('found'):
             return data
         return None
@@ -630,18 +712,26 @@ def clear_user_id_from_sheets(user_id):
 def update_last_interaction(user_id):
     """更新 Last_Interaction（台灣時間）"""
     try:
-        global today_interacted, last_date_check
-        
         tw_now = datetime.now(TW_TZ)
-        
-        current_date = tw_now.date()
-        if current_date != last_date_check:
-            today_interacted.clear()
-            last_date_check = current_date
-        
-        is_first_today = user_id not in today_interacted
-        if is_first_today:
-            today_interacted.add(user_id)
+        current_date_str = tw_now.date().isoformat()
+
+        with _state_conn() as conn:
+            row = conn.execute(
+                'SELECT last_interaction_date FROM bot_state WHERE user_id = ?',
+                (user_id,)
+            ).fetchone()
+
+            last_date = row[0] if row and row[0] else None
+            is_first_today = (last_date != current_date_str)
+
+            conn.execute(
+                '''
+                INSERT INTO bot_state (user_id, last_interaction_date)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET last_interaction_date = excluded.last_interaction_date
+                ''',
+                (user_id, current_date_str)
+            )
         
         tw_now_str = tw_now.strftime('%Y-%m-%d %H:%M:%S')
         
@@ -709,7 +799,7 @@ def trigger_d7(user_message, group, user_id):
             )
             
             if response.status_code == 200:
-                data = response.json()
+                data = _parse_json_response(response, 'OpenAI')
                 ai_response = data['choices'][0]['message']['content'].strip()
                 
                 print(f'[DEBUG] OpenAI response: {ai_response}')
@@ -816,9 +906,10 @@ def call_dify(group, message, user_id):
             'response_mode': 'blocking'
         }
         
-        if user_id in user_conversations:
-            request_data['conversation_id'] = user_conversations[user_id]
-            print(f'[DEBUG] Using conversation: {user_conversations[user_id]}')
+        conversation_id = get_conversation_id(user_id)
+        if conversation_id:
+            request_data['conversation_id'] = conversation_id
+            print(f'[DEBUG] Using conversation: {conversation_id}')
         else:
             print(f'[DEBUG] New conversation: {user_id}')
         
@@ -831,12 +922,12 @@ def call_dify(group, message, user_id):
             json=request_data,
             timeout=30
         )
-        
-        data = response.json()
+
+        data = _parse_json_response(response, 'Dify')
         ai_reply = data.get('answer', '抱歉，我現在無法回覆。')
         
         if 'conversation_id' in data:
-            user_conversations[user_id] = data['conversation_id']
+            set_conversation_id(user_id, data['conversation_id'])
             print(f'[DEBUG] Saved conversation ID: {data["conversation_id"]}')
         
         update_last_interaction(user_id)
@@ -852,7 +943,7 @@ def call_dify(group, message, user_id):
 def send_line_reply(reply_token, message):
     """發送 LINE 回覆"""
     try:
-        requests.post(
+        response = requests.post(
             'https://api.line.me/v2/bot/message/reply',
             headers={
                 'Content-Type': 'application/json',
@@ -864,6 +955,8 @@ def send_line_reply(reply_token, message):
             },
             timeout=10
         )
+        if response.status_code >= 400:
+            print(f'[ERROR] LINE reply failed: {response.status_code} {response.text[:200]}')
     except Exception as e:
         print(f'[ERROR] LINE reply error: {str(e)}')
 
