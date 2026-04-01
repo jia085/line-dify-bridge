@@ -31,8 +31,8 @@ SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
 STATE_DB_PATH = os.environ.get('STATE_DB_PATH', 'state_alex.db')
 
 # ========== D7 設定 ==========
-# ⭐ 修改：改為 Day 8 觸發
-CONFLICT_DAY = 8  # 衝突觸發日（原本是 7，現在改成 8）
+# ⭐ 修改：改回 Day 7 觸發
+CONFLICT_DAY = 7  # 衝突觸發日（原本改成 8，現在改回 7）
 
 # 觸發語句（所有組相同）
 D7_TRIGGERS = {
@@ -408,7 +408,7 @@ def handle_message_event(event):
                 tw_now = datetime.now(TW_TZ)
                 
                 # ⭐ 因為 Day 1 = 驗證當天，所以要減去 (target_day - 1) 天
-                # 例如：TESTDAY 8 → 減去 7 天 → Current_Day = 8
+                # 例如：TESTDAY 7 → 減去 6 天 → Current_Day = 7
                 target_date = tw_now - timedelta(days=target_day - 1)
                 
                 # ⭐ 強制時間為 00:00:00（避免時區差異導致天數計算錯誤）
@@ -435,7 +435,7 @@ def handle_message_event(event):
                     # 清除本地 D7 對話記錄
                     clear_d7_turn(user_id)
                     
-                    # ⭐ 修改：提示改為 Day 8
+                    # ⭐ 修改：提示改為 Day 7
                     if target_day == CONFLICT_DAY:
                         reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}\n\n現在可以測試衝突觸發了！（Day {CONFLICT_DAY}）'
                     else:
@@ -450,7 +450,7 @@ def handle_message_event(event):
                     send_line_reply(reply_token, reply_message)
                     return {'status': 'error'}
             else:
-                reply_message = f'❌ 格式錯誤\n正確用法：TESTDAY 8\n（設定為 Day {CONFLICT_DAY}）'
+                reply_message = f'❌ 格式錯誤\n正確用法：TESTDAY 7\n（設定為 Day {CONFLICT_DAY}）'
                 send_line_reply(reply_token, reply_message)
                 return {'status': 'invalid_format'}
         
@@ -577,7 +577,7 @@ def handle_message_event(event):
         
         print(f'[DEBUG] User verified: group={group}, day={current_day}, d7_triggered={d7_triggered}')
         
-        # ========== ⭐⭐⭐ 衝突觸發檢查（改為 Day 8）⭐⭐⭐ ==========
+        # ========== ⭐⭐⭐ 衝突觸發檢查（改回 Day 7）⭐⭐⭐ ==========
         if current_day == CONFLICT_DAY and not d7_triggered:
             
             # 檢查是否在分享個人經驗（使用超放寬版）
@@ -621,7 +621,7 @@ def handle_message_event(event):
                 send_line_reply(reply_token, ai_reply)
                 return {'status': 'success'}
         
-        # 正常對話（Day 8 之前或之後，或已觸發過）
+        # 正常對話（Day 7 之前或之後，或已觸發過）
         # ⭐ 記錄使用者訊息
         participant_code = user_data.get('code', '')
         log_conversation(user_id, participant_code, 'user', user_message, False, 'normal', current_day)

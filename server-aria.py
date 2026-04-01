@@ -31,8 +31,8 @@ SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
 STATE_DB_PATH = os.environ.get('STATE_DB_PATH', 'state_aria.db')
 
 # ========== D7 設定 ==========
-# ⭐ 修改：改為 Day 8 觸發
-CONFLICT_DAY = 8  # 衝突觸發日（原本是 7，現在改成 8）
+# ⭐ 修改：改回 Day 7 觸發
+CONFLICT_DAY = 7  # 衝突觸發日（原本改成 8，現在改回 7）
 
 # D7 腳本映射（E/F/G/H 使用 A/B/C/D 的腳本）
 D7_GROUP_MAPPING = {
@@ -417,7 +417,7 @@ def handle_message_event(event):
                     send_line_reply(reply_token, reply_message)
                     return {'status': 'error'}
             else:
-                reply_message = f'❌ 格式錯誤\n正確用法：TESTDAY 8\n（設定為 Day {CONFLICT_DAY}）'
+                reply_message = f'❌ 格式錯誤\n正確用法：TESTDAY 7\n（設定為 Day {CONFLICT_DAY}）'
                 send_line_reply(reply_token, reply_message)
                 return {'status': 'invalid_format'}
 
