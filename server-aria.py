@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta
 import pytz
@@ -187,6 +188,25 @@ def log_conversation(user_id, participant_code, message_type, message_content, i
             
     except Exception as e:
         print(f'[ARIA] Log conversation error: {str(e)}')
+
+def split_ai_reply_chunks(message, max_messages=5):
+    """把 AI 回覆切成多個訊息泡泡，營造分段感。"""
+    normalized = str(message or '').replace('\\n', '\n').strip()
+    if not normalized:
+        return ['...']
+
+    chunks = [part.strip() for part in normalized.split('\n') if part.strip()]
+
+    if len(chunks) <= 1:
+        chunks = [part.strip() for part in re.split(r'(?<=[。！？!?])\s*', normalized) if part.strip()]
+
+    if not chunks:
+        chunks = [normalized]
+
+    if len(chunks) > max_messages:
+        chunks = chunks[:max_messages - 1] + ['\n'.join(chunks[max_messages - 1:])]
+
+    return chunks
 
 def is_sharing_personal_experience(user_message):
     """
@@ -558,7 +578,7 @@ def handle_message_event(event):
 
                 log_conversation(user_id, participant_code, 'ai', ai_reply, False, 'normal', current_day)
 
-                send_line_reply(reply_token, ai_reply)
+                send_line_reply(reply_token, ai_reply, split_text=True)
                 return {'status': 'success'}
 
         participant_code = user_data.get('code', '')
@@ -568,7 +588,7 @@ def handle_message_event(event):
 
         log_conversation(user_id, participant_code, 'ai', ai_reply, False, 'normal', current_day)
 
-        send_line_reply(reply_token, ai_reply)
+        send_line_reply(reply_token, ai_reply, split_text=True)
 
         return {'status': 'success'}
 
@@ -856,9 +876,22 @@ def call_dify(group, message, user_id):
 
 # ========== LINE 函數 ==========
 
-def send_line_reply(reply_token, message):
+def send_line_reply(reply_token, message, split_text=False):
     """發送 LINE 回覆"""
     try:
+        if isinstance(message, list):
+            chunks = [str(item).strip() for item in message if str(item).strip()]
+        elif split_text:
+            chunks = split_ai_reply_chunks(message)
+        else:
+            text = str(message or '').strip()
+            chunks = [text] if text else ['...']
+
+        messages = [{'type': 'text', 'text': chunk[:5000]} for chunk in chunks if chunk]
+
+        if not messages:
+            messages = [{'type': 'text', 'text': '...'}]
+
         response = requests.post(
             'https://api.line.me/v2/bot/message/reply',
             headers={
@@ -867,7 +900,7 @@ def send_line_reply(reply_token, message):
             },
             json={
                 'replyToken': reply_token,
-                'messages': [{'type': 'text', 'text': message}]
+                'messages': messages
             },
             timeout=10
         )
