@@ -27,6 +27,10 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 # Google Sheets API URL
 SHEETS_API_URL = os.environ.get('SHEETS_API_URL')
 
+# Daily nudge 設定
+JOB_SECRET = os.environ.get('JOB_SECRET')
+NUDGE_MESSAGE = os.environ.get('NUDGE_MESSAGE', '嗨！今天還好嗎？有什麼想聊的嗎？')
+
 # 本地狀態儲存（避免重啟後遺失）
 STATE_DB_PATH = os.environ.get('STATE_DB_PATH', 'state_alex.db')
 
@@ -959,6 +963,112 @@ def send_line_reply(reply_token, message):
             print(f'[ERROR] LINE reply failed: {response.status_code} {response.text[:200]}')
     except Exception as e:
         print(f'[ERROR] LINE reply error: {str(e)}')
+
+def send_line_push(user_id, message):
+    """主動推播 LINE 訊息給指定 user_id"""
+    try:
+        response = requests.post(
+            'https://api.line.me/v2/bot/message/push',
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+            },
+            json={
+                'to': user_id,
+                'messages': [{'type': 'text', 'text': message}]
+            },
+            timeout=10
+        )
+        if response.status_code >= 400:
+            print(f'[ERROR] LINE push failed for {user_id}: {response.status_code} {response.text[:200]}')
+            return False
+        print(f'[DEBUG] LINE push sent to {user_id}')
+        return True
+    except Exception as e:
+        print(f'[ERROR] LINE push error for {user_id}: {str(e)}')
+        return False
+
+# ========== Daily Nudge Job ==========
+
+ALEX_GROUPS = {'A', 'B', 'C', 'D'}
+
+@app.route('/jobs/daily-nudge', methods=['POST'])
+def daily_nudge():
+    """Render Cron Job 觸發的每日推播 endpoint（僅限 Alex bot：A/B/C/D 組）"""
+    # 驗證 JOB_SECRET
+    secret = request.headers.get('X-Job-Secret') or request.args.get('secret', '')
+    if not JOB_SECRET or secret != JOB_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    tw_today = datetime.now(TW_TZ).date().isoformat()
+    print(f'[NUDGE] Starting daily nudge for Alex bot, date: {tw_today}')
+
+    # 取得所有 Active 用戶
+    try:
+        resp = requests.get(f'{SHEETS_API_URL}?action=get_active_users', timeout=15)
+        users = resp.json().get('users', [])
+    except Exception as e:
+        print(f'[NUDGE] Failed to fetch users: {str(e)}')
+        return jsonify({'error': 'Failed to fetch users'}), 500
+
+    pushed = []
+    skipped_interacted = []
+    skipped_nudged = []
+    failed = []
+
+    for user in users:
+        user_id = user.get('user_id', '')
+        group = user.get('group', '')
+        code = user.get('code', '')
+        last_interaction = user.get('last_interaction', '')
+        last_nudge_date = user.get('last_nudge_date', '')
+
+        # 只處理 Alex 的組別
+        if group not in ALEX_GROUPS:
+            continue
+
+        # 今天已互動 → 跳過
+        if last_interaction and last_interaction[:10] == tw_today:
+            skipped_interacted.append(user_id)
+            print(f'[NUDGE] Skip {user_id} (interacted today)')
+            continue
+
+        # 今天已推播 → 跳過
+        if last_nudge_date == tw_today:
+            skipped_nudged.append(user_id)
+            print(f'[NUDGE] Skip {user_id} (already nudged today)')
+            continue
+
+        # 發送推播
+        success = send_line_push(user_id, NUDGE_MESSAGE)
+        if success:
+            pushed.append(user_id)
+
+            # 寫回 Sheets：更新 Last_Nudge_Date
+            try:
+                requests.post(
+                    SHEETS_API_URL,
+                    json={'user_id': user_id, 'last_nudge_date': tw_today},
+                    timeout=10
+                )
+            except Exception as e:
+                print(f'[NUDGE] Failed to update last_nudge_date for {user_id}: {str(e)}')
+
+            # 記錄到 Conversation_Logs
+            log_conversation(user_id, code, 'ai', NUDGE_MESSAGE, True, 'nudge', None)
+        else:
+            failed.append(user_id)
+
+    result = {
+        'date': tw_today,
+        'pushed': len(pushed),
+        'skipped_interacted': len(skipped_interacted),
+        'skipped_already_nudged': len(skipped_nudged),
+        'failed': len(failed),
+        'pushed_ids': pushed
+    }
+    print(f'[NUDGE] Done: {result}')
+    return jsonify(result), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
