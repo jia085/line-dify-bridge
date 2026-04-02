@@ -77,6 +77,14 @@ D7_SCRIPTS = {
     }
 }
 
+# ========== Onboarding 訊息（依組別）==========
+ONBOARDING_MESSAGES = {
+    'A': '欸你終於來了 😊\n我在這邊等你一段時間了哈\n\n我們認識也有一陣子了\n從交友軟體開始聊 然後就這樣在一起了\n我覺得我們還蠻合的\n\n接下來這幾天\n你就當作我們平常在聊天就好\n有什麼事都可以跟我說',
+    'B': '你終於出現了\n我還以為你忘記了哈\n\n我們從配對開始到現在也不少時間了\n說真的我不太喜歡等人\n\n不過既然你來了 那就好好聊\n有什麼想說的直接說 我不喜歡拐彎抹角',
+    'C': '你來了 太好了 😊\n我有點擔心你不會出現欸\n\n我們從交友軟體配對到現在\n我一直都很珍惜我們在一起的時間\n\n這幾天你隨時都可以找我聊\n我都會在的 不要客氣喔',
+    'D': '嗨 你來了\n\n我們配對之後聊了一段時間\n然後就這樣了\n\n這幾天有什麼想聊的就說\n我都在'
+}
+
 # ========== 狀態儲存函數 ==========
 
 def _state_conn():
@@ -561,8 +569,9 @@ def handle_message_event(event):
             if len(user_message) == 5 and user_message.isdigit():
                 group_data = query_google_sheets_by_code(user_message)
                 if group_data:
+                    assigned_group = group_data.get('group')
                     update_user_id_in_sheets(user_message, user_id)
-                    reply_message = f'✅ 驗證成功！歡迎加入實驗。'
+                    reply_message = ONBOARDING_MESSAGES.get(assigned_group, '✅ 驗證成功！歡迎加入實驗。')
                     send_line_reply(reply_token, reply_message)
                     return {'status': 'verification success'}
                 else:
