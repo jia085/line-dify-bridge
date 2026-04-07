@@ -39,6 +39,7 @@ pip install -r requirements.txt
 
 - SHEETS_API_URL：Google Sheets Apps Script Web API URL
 - OPENAI_API_KEY：情緒判斷用（可選；未提供時使用關鍵字 fallback）
+- JOB_SECRET：Cron Job 驗證密鑰（X-Job-Secret header）
 - PORT：服務埠號（預設 10000）
 - STATE_DB_PATH：本地 SQLite 狀態檔路徑（可選）
 
@@ -49,6 +50,7 @@ pip install -r requirements.txt
 - DIFY_KEY_C
 - DIFY_KEY_D
 - LINE_CHANNEL_ACCESS_TOKEN
+- NUDGE_MESSAGE：Daily Nudge 推播內容（預設：嗨！今天還好嗎？有什麼想聊的嗎？）
 
 ### Aria Bot（server-aria.py）
 
@@ -57,6 +59,7 @@ pip install -r requirements.txt
 - DIFY_KEY_G
 - DIFY_KEY_H
 - LINE_CHANNEL_ACCESS_TOKEN_ARIA
+- NUDGE_MESSAGE_ARIA：Aria 的 Daily Nudge 推播內容
 
 ## 5. 啟動方式
 
@@ -95,6 +98,8 @@ gunicorn -w 1 -b 0.0.0.0:${PORT:-10000} server-aria:app
 - GET /：健康檢查
 - GET /webhook：webhook readiness
 - POST /webhook：LINE 事件處理主入口
+- POST /jobs/daily-nudge：Cron Job — 每日推播（今日未互動的用戶）
+- POST /jobs/d7-trigger：Cron Job — Day 7 推播引導句（D7_SETUP_MESSAGES）
 
 ## 7. 主要流程
 
@@ -102,24 +107,27 @@ gunicorn -w 1 -b 0.0.0.0:${PORT:-10000} server-aria:app
 2. 若未驗證，要求輸入手機末 5 碼
 3. 用 code 向 Sheets 查詢並綁定 LINE user_id
 4. 已驗證使用者進入 Dify 對話流程
-5. 每次 user/ai 訊息可寫入 Conversation_Logs
+5. 每次 user/ai 訊息寫入 Conversation_Logs
 6. 每次互動更新 last_interaction 與 is_first_today
-7. Day 7 且尚未觸發過時，進入衝突腳本流程
+7. 每日 21:00（TW）Cron Job 對今日未互動用戶主動推播 Daily Nudge
+8. Day 7 18:00（TW）Cron Job 推播 D7 引導句（提高用戶發話機率）
+9. Day 7 收到用戶第一則訊息時，進入衝突腳本流程（無論有無先收到引導句）
 
 ## 8. Day 7 衝突腳本流程
 
 - 觸發條件：
-	- current_day == 8
+	- current_day == 7
 	- d7_triggered == False
-	- 訊息被判定為「分享個人經驗」
+	- Day 7 收到第一則訊息即觸發（不需先收到引導句）
 
 - 情緒判斷：
-	- 優先 OpenAI API（gpt-4o-mini）
+	- 優先 OpenAI API（gpt-4o-mini，temperature=0）
 	- 失敗則 fallback 關鍵字法
+	- 結果：Positive / Negative / Neutral
 
 - 回覆邏輯：
-	- 第 1 輪：依情緒回固定 trigger sentence
-	- 第 2 輪：固定腳本
+	- 第 1 輪：依組別 × 情緒選衝突語句（D7_TRIGGERS）
+	- 第 2 輪：固定腳本（D7_SCRIPTS[group][2]）
 	- 第 3 輪：依使用者反應分類（合作/拒絕/質疑/中性）選分支腳本
 	- 之後恢復一般 Dify 對話
 
@@ -144,8 +152,10 @@ gunicorn -w 1 -b 0.0.0.0:${PORT:-10000} server-aria:app
 
 ## 11. 已知限制
 
-- 對話狀態改為本地 SQLite 持久化（重啟不會遺失）
-	- 但多實例部署時仍不共享（需 Redis/集中式 DB 才能完全解）
+- Render 上的 SQLite **重啟後會清空**
+	- `d7_turn` 已同步寫入 Sheets（AA 欄），重啟後可自動還原
+	- `conversation_id`（Dify 記憶）重啟後遺失，Dify 會開新對話
+	- 多實例部署時狀態不共享（需 Redis 才能完全解）
 - 目前未做 LINE 簽章驗證（X-Line-Signature）
 - timeout 與錯誤重試策略較基礎，尖峰流量下有風險
 
