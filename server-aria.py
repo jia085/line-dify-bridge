@@ -450,6 +450,11 @@ def handle_message_event(event):
                 log_conversation(user_id, participant_code, 'user', user_message, False, '', current_day)
                 log_conversation(user_id, participant_code, 'ai', ai_reply, True, script_type, current_day)
 
+                # ⭐ 先回覆 LINE（reply token 有效期約 30 秒，必須在 call_dify 之前）
+                send_line_reply(reply_token, ai_reply)
+                set_d7_turn(user_id, turn + 1)
+
+                # 維護 Dify 記憶（不用其回應）
                 print(f'[ARIA] Calling Dify to maintain conversation memory (turn {turn})')
                 dify_reply = call_dify(group, user_message, user_id)
                 print(f'[ARIA] Dify response ignored: {dify_reply[:50]}...')
@@ -458,10 +463,6 @@ def handle_message_event(event):
                 mock_user_msg = f"[以下是我的回應]：{ai_reply}"
                 call_dify(group, mock_user_msg, user_id)
                 print(f'[ARIA] AI script added to Dify memory')
-
-                send_line_reply(reply_token, ai_reply)
-
-                set_d7_turn(user_id, turn + 1)
 
                 print(f'[ARIA] D7 turn {turn} completed, next turn: {turn + 1}')
                 return {'status': 'success'}
@@ -516,12 +517,14 @@ def handle_message_event(event):
 
             log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
 
-            _ = call_dify(group, user_message, user_id)
-
+            # ⭐ 先回覆 LINE（reply token 有效期約 30 秒，必須在 call_dify 之前）
             set_d7_setup(user_id, 0)
             set_d7_turn(user_id, 2)
-
             send_line_reply(reply_token, trigger_sentence)
+
+            # 維護 Dify 記憶（不用其回應）
+            _ = call_dify(group, user_message, user_id)
+
             return {'status': 'conflict_triggered'}
         log_conversation(user_id, participant_code, 'user', user_message, False, 'normal', current_day)
 
