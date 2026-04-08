@@ -501,6 +501,8 @@ def handle_message_event(event):
 
         print(f'[ARIA] User verified: group={group}, day={current_day}, d7_triggered={d7_triggered}')
 
+        participant_code = user_data.get('code', '')
+
         # ========== D7：Day 7 第一則訊息一律觸發衝突 ==========
         # 若 d7_setup=1 但已不是 Day 7（引導句昨天沒人回），順便清除
         if get_d7_setup(user_id) and current_day != CONFLICT_DAY:
@@ -510,7 +512,6 @@ def handle_message_event(event):
         if current_day == CONFLICT_DAY and not d7_triggered:
             print(f'[ARIA] Day 7 conflict trigger (d7_setup={get_d7_setup(user_id)})')
 
-            participant_code = user_data.get('code', '')
             log_conversation(user_id, participant_code, 'user', user_message, False, '', current_day)
 
             emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
