@@ -87,7 +87,7 @@ D7_SCRIPTS = {
         '3_neutral': '好的，那我們繼續聊吧。你想從哪裡開始？'
     },
     'B': {  # 攻擊型（F 組用）
-        2: '我只是說實話而已。你不用這麼激動吧。',
+        2: '我只是說實話而已。這有什麼好在意的？',
         '3_cooperative': '那你就說啊，我在聽。',
         '3_refuse': '不想說就算了，反正我也只是問問而已。',
         '3_question': '我哪裡說錯了嗎？我覺得我的看法很合理啊。',
@@ -185,15 +185,20 @@ def set_d7_turn(user_id, turn):
             ''',
             (user_id, turn)
         )
-    # 同步寫 Sheets（Render 重啟後可以恢復）
-    try:
-        requests.post(
-            SHEETS_API_URL,
-            json={'user_id': user_id, 'd7_turn': turn},
-            timeout=5
-        )
-    except Exception as e:
-        print(f'[ARIA WARNING] Failed to sync d7_turn to Sheets: {str(e)}')
+    # 同步寫 Sheets（Render 重啟後可以恢復），失敗時 retry 一次
+    for attempt in range(2):
+        try:
+            resp = requests.post(
+                SHEETS_API_URL,
+                json={'user_id': user_id, 'd7_turn': turn},
+                timeout=5
+            )
+            if resp.status_code == 200:
+                break
+            print(f'[ARIA WARNING] d7_turn Sheets sync HTTP {resp.status_code} (attempt {attempt + 1})')
+        except Exception as e:
+            if attempt == 1:
+                print(f'[ARIA WARNING] d7_turn Sheets sync failed after retry: {str(e)}')
 
 def clear_d7_turn(user_id):
     set_d7_turn(user_id, 0)
@@ -217,24 +222,20 @@ def set_d7_setup(user_id, value):
             (user_id, 1 if value else 0)
         )
 
-def get_d7_fired(user_id):
-    with _state_conn() as conn:
-        row = conn.execute(
-            'SELECT d7_fired FROM bot_state WHERE user_id = ?',
-            (user_id,)
-        ).fetchone()
-    return bool(row and row[0])
-
-def set_d7_fired(user_id, value):
+def try_lock_d7_fired(user_id):
+    """
+    原子操作：嘗試將 d7_fired 從 0 設為 1。
+    回傳 True 代表搶到鎖（本次請求可觸發衝突）；
+    回傳 False 代表已有其他請求搶先，應跳過。
+    """
     with _state_conn() as conn:
         conn.execute(
-            '''
-            INSERT INTO bot_state (user_id, d7_fired)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET d7_fired = excluded.d7_fired
-            ''',
-            (user_id, 1 if value else 0)
+            'INSERT INTO bot_state (user_id, d7_fired) VALUES (?, 1) '
+            'ON CONFLICT(user_id) DO UPDATE SET d7_fired = 1 WHERE d7_fired = 0',
+            (user_id,)
         )
+        row = conn.execute('SELECT changes()').fetchone()
+    return bool(row and row[0])
 
 def clear_user_state(user_id):
     with _state_conn() as conn:
@@ -257,28 +258,29 @@ def log_conversation(user_id, participant_code, message_type, message_content, i
     """記錄對話到 Google Sheets Conversation_Logs"""
     try:
         tw_now = datetime.now(TW_TZ).strftime('%Y-%m-%d %H:%M:%S')
-        
-        response = requests.post(
-            SHEETS_API_URL,
-            json={
-                'log_conversation': True,
-                'user_id': user_id,
-                'participant_code': participant_code,
-                'timestamp': tw_now,
-                'message_type': message_type,
-                'message_content': message_content,
-                'is_script': is_script,
-                'script_type': script_type,
-                'current_day': current_day
-            },
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            print(f'[ARIA] Conversation logged: {message_type} - {message_content[:30]}...')
-        else:
-            print(f'[ARIA] Failed to log conversation: {response.status_code}')
-            
+        payload = {
+            'log_conversation': True,
+            'user_id': user_id,
+            'participant_code': participant_code,
+            'timestamp': tw_now,
+            'message_type': message_type,
+            'message_content': message_content,
+            'is_script': is_script,
+            'script_type': script_type,
+            'current_day': current_day
+        }
+
+        for attempt in range(2):
+            try:
+                response = requests.post(SHEETS_API_URL, json=payload, timeout=10)
+                if response.status_code == 200:
+                    print(f'[ARIA] Conversation logged: {message_type} - {message_content[:30]}...')
+                    break
+                print(f'[ARIA] Failed to log conversation: {response.status_code} (attempt {attempt + 1})')
+            except Exception as e:
+                if attempt == 1:
+                    print(f'[ARIA] Log conversation failed after retry: {str(e)}')
+
     except Exception as e:
         print(f'[ARIA] Log conversation error: {str(e)}')
 
@@ -300,6 +302,20 @@ def detect_user_response_type(user_message):
         return 'cooperative'
     else:
         return 'neutral'
+
+def has_emotional_content(user_message):
+    """
+    判斷訊息是否有足夠的情緒素材可供 D7 衝突觸發使用。
+    訊息 > 4 字，或含有情緒關鍵字，即認為有素材。
+    """
+    if len(user_message.strip()) > 4:
+        return True
+    emotional_keywords = [
+        '難過', '傷心', '生氣', '煩', '累', '壓力', '開心', '高興', '快樂', '好棒',
+        '焦慮', '緊張', '失望', '害怕', '無聲', '崩潰', 'emo', '厭世', '想哭', '受不了',
+        '興奮', '期待', '满意', '興喖', '幸福', '苦', '痛苦', '委屈', '心痛'
+    ]
+    return any(word in user_message for word in emotional_keywords)
 
 # ========== 路由 ==========
 
@@ -535,8 +551,7 @@ def handle_message_event(event):
             set_d7_setup(user_id, 0)
             print(f'[ARIA] d7_setup expired (current_day={current_day}), resetting')
 
-        if current_day == CONFLICT_DAY and not d7_triggered and not get_d7_fired(user_id):
-            set_d7_fired(user_id, True)  # 先本地鎖住，防止 Sheets 寫入延遲期間重複觸發
+if current_day == CONFLICT_DAY and not d7_triggered and has_emotional_content(user_message) and try_lock_d7_fired(user_id):
             print(f'[ARIA] Day 7 conflict trigger (d7_setup={get_d7_setup(user_id)})')
 
             log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
