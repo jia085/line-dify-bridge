@@ -165,6 +165,15 @@ handle_message_event(event)
 - 若用戶 Day 7 沒回覆引導句，下次傳訊時仍會觸發衝突
 - `d7_setup = 1` 只是「引導句已發出」的紀錄，避免重複推播
 
+各組別引導句（寫死於 `D7_SETUP_MESSAGES`）：
+
+| 組別 | 引導句 |
+|------|--------|
+| A / E（協作型）| 欸，你最近心情怎麼樣？有什麼想跟我說的嗎 |
+| B / F（攻擊型）| 你今天怎樣 |
+| C / G（遷就型）| 欸，你今天還好嗎？我有點擔心你欸 |
+| D / H（迴避型）| 欸，你最近怎樣 |
+
 ### 6.3 情緒偵測（GPT-4o-mini）
 
 ```
@@ -206,6 +215,16 @@ Turn 4+：clear_d7_turn()，恢復正常 Dify 對話
 | D7 引導句（Aria）| 10:00 | 18:00 | `POST /jobs/d7-trigger` | 同上，Aria 服務 |
 
 所有 Cron Job 需附帶 Header：`X-Job-Secret: <JOB_SECRET>`
+
+### Daily Nudge 訊息內容
+
+由環境變數 `NUDGE_MESSAGE` 設定，預設值：`嗨！今天還好嗎？有什麼想聊的嗎？`
+
+跳過條件（任一符合則不推播）：
+- 今天已有互動（`last_interaction` 日期 = 今天）
+- 今天已推過（`last_nudge_date` = 今天）
+
+> ⚠️ **已知問題**：`server-aria.py` 讀取的是 `NUDGE_MESSAGE` 而非 `NUDGE_MESSAGE_ARIA`，導致 Alex 與 Aria 無法設定不同的 nudge 訊息。如需區分，需將 `server-aria.py` 第 32 行改為讀取 `NUDGE_MESSAGE_ARIA`。
 
 ---
 
