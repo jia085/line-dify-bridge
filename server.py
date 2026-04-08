@@ -123,6 +123,7 @@ def init_state_store():
                 conversation_id TEXT,
                 d7_turn INTEGER NOT NULL DEFAULT 0,
                 d7_setup INTEGER NOT NULL DEFAULT 0,
+                d7_fired INTEGER NOT NULL DEFAULT 0,
                 last_interaction_date TEXT
             )
             '''
@@ -130,6 +131,10 @@ def init_state_store():
         # 相容舊資料庫：補上新欄位
         try:
             conn.execute('ALTER TABLE bot_state ADD COLUMN d7_setup INTEGER NOT NULL DEFAULT 0')
+        except Exception:
+            pass
+        try:
+            conn.execute('ALTER TABLE bot_state ADD COLUMN d7_fired INTEGER NOT NULL DEFAULT 0')
         except Exception:
             pass
 
@@ -204,6 +209,25 @@ def set_d7_setup(user_id, value):
             (user_id, 1 if value else 0)
         )
 
+def get_d7_fired(user_id):
+    with _state_conn() as conn:
+        row = conn.execute(
+            'SELECT d7_fired FROM bot_state WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+    return bool(row and row[0])
+
+def set_d7_fired(user_id, value):
+    with _state_conn() as conn:
+        conn.execute(
+            '''
+            INSERT INTO bot_state (user_id, d7_fired)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET d7_fired = excluded.d7_fired
+            ''',
+            (user_id, 1 if value else 0)
+        )
+
 def clear_user_state(user_id):
     with _state_conn() as conn:
         conn.execute('DELETE FROM bot_state WHERE user_id = ?', (user_id,))
@@ -270,20 +294,20 @@ def detect_user_response_type(user_message):
     cooperative_keywords = ['好', '可以', '嗯嗯', '是', '對', '想', '願意', '要', '會', '行']
     
     # 拒絕關鍵字
-    refuse_keywords = ['不要', '不想', '不行', '不會', '不', '沒有', '不用', '算了', '免了']
+    refuse_keywords = ['不要', '不想', '不行', '不會', '沒有', '不用', '算了', '免了']
     
     # 質疑關鍵字
     question_keywords = ['為什麼', '為何', '怎麼', '什麼', '幹嘛', '幹麻', '你在', '?', '？', '憑什麼']
     
     message = user_message.lower()
     
-    # 優先檢查拒絕（最明確）
-    if any(word in message for word in refuse_keywords):
-        return 'refuse'
-    
-    # 其次檢查質疑
-    elif any(word in message for word in question_keywords):
+    # 優先檢查質疑（疑問詞最明確，且可能與拒絕詞共存）
+    if any(word in message for word in question_keywords):
         return 'question'
+    
+    # 其次檢查拒絕
+    elif any(word in message for word in refuse_keywords):
+        return 'refuse'
     
     # 再檢查合作
     elif any(word in message for word in cooperative_keywords):
@@ -490,7 +514,7 @@ def handle_message_event(event):
                     script_type = 'd7_turn3'
                 
                 # ⭐⭐⭐ 記錄使用者訊息
-                log_conversation(user_id, participant_code, 'user', user_message, False, '', current_day)
+                log_conversation(user_id, participant_code, 'user', user_message, False, script_type, current_day)
                 
                 # ⭐⭐⭐ 記錄 AI 固定腳本
                 log_conversation(user_id, participant_code, 'ai', ai_reply, True, script_type, current_day)
@@ -552,11 +576,12 @@ def handle_message_event(event):
             set_d7_setup(user_id, 0)
             print(f'[DEBUG] d7_setup expired (current_day={current_day}), resetting')
 
-        if current_day == CONFLICT_DAY and not d7_triggered:
+        if current_day == CONFLICT_DAY and not d7_triggered and not get_d7_fired(user_id):
+            set_d7_fired(user_id, True)  # 先本地鎖住，防止 Sheets 寫入延遲期間重複觸發
             print(f'[DEBUG] Day 7 conflict trigger (d7_setup={get_d7_setup(user_id)})')
 
             participant_code = user_data.get('code', '')
-            log_conversation(user_id, participant_code, 'user', user_message, False, '', current_day)
+            log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
 
             emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
 
@@ -569,6 +594,10 @@ def handle_message_event(event):
 
             # 維護 Dify 記憶（不用其回應）
             _ = call_dify(group, user_message, user_id)
+            # 把衝突句餐回 Dify，讓它知道自己說了什麼
+            mock_trigger = f"[以下是我的回應]：{trigger_sentence}"
+            call_dify(group, mock_trigger, user_id)
+            print(f'[DEBUG] Trigger sentence fed to Dify memory: {trigger_sentence[:30]}...')
 
             return {'status': 'conflict_triggered'}
         
