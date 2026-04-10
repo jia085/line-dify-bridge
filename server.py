@@ -195,6 +195,13 @@ def set_d7_turn(user_id, turn):
 def clear_d7_turn(user_id):
     set_d7_turn(user_id, 0)
 
+def clear_d7_fired(user_id):
+    with _state_conn() as conn:
+        conn.execute(
+            'UPDATE bot_state SET d7_fired = 0 WHERE user_id = ?',
+            (user_id,)
+        )
+
 def get_d7_setup(user_id):
     with _state_conn() as conn:
         row = conn.execute(
@@ -294,30 +301,36 @@ def detect_user_response_type(user_message):
     """
     # 合作關鍵字
     cooperative_keywords = ['好', '可以', '嗯嗯', '是', '對', '想', '願意', '要', '會', '行']
-    
-    # 拒絕關鍵字
-    refuse_keywords = ['不要', '不想', '不行', '不會', '沒有', '不用', '算了', '免了']
-    
+
+    # 拒絕關鍵字（含否定合作詞與程度修飾否定詞）
+    refuse_keywords = ['不要', '不想', '不行', '不會', '沒有', '不用', '算了', '免了',
+                       '不好', '不太好', '不是', '不對', '不願意', '不可以']
+
     # 質疑關鍵字
-    question_keywords = ['為什麼', '為何', '怎麼', '什麼', '幹嘛', '幹麻', '你在', '?', '？', '憑什麼']
-    
+    question_keywords = ['為什麼', '為何', '怎麼', '幹嘛', '幹麻', '你在', '?', '？', '憑什麼']
+
+    # 慣用語例外：含有合作/拒絕關鍵字但語意為中性，強制回 neutral
+    neutral_overrides = ['不好意思', '還好', '沒想到', '想太多', '要死了', '要瘋了']
+
     message = user_message.lower()
-    
-    # 優先檢查質疑（疑問詞最明確，且可能與拒絕詞共存）
+
+    # 1. 優先檢查質疑
     if any(word in message for word in question_keywords):
         return 'question'
-    
-    # 其次檢查拒絕
-    elif any(word in message for word in refuse_keywords):
-        return 'refuse'
-    
-    # 再檢查合作
-    elif any(word in message for word in cooperative_keywords):
-        return 'cooperative'
-    
-    # 預設為中性
-    else:
+
+    # 2. 排除慣用語誤判（在 refuse/cooperative 判斷前過濾）
+    if any(phrase in message for phrase in neutral_overrides):
         return 'neutral'
+
+    # 3. 檢查拒絕
+    if any(word in message for word in refuse_keywords):
+        return 'refuse'
+
+    # 4. 檢查合作
+    if any(word in message for word in cooperative_keywords):
+        return 'cooperative'
+
+    return 'neutral'
 
 def has_emotional_content(user_message):
     """
@@ -329,7 +342,7 @@ def has_emotional_content(user_message):
     emotional_keywords = [
         '難過', '傷心', '生氣', '煩', '累', '壓力', '開心', '高興', '快樂', '好棒',
         '焦慮', '緊張', '失望', '害怕', '無聲', '崩潰', 'emo', '厭世', '想哭', '受不了',
-        '興奮', '期待', '满意', '興喖', '幸福', '苦', '痛苦', '委屈', '心痛'
+        '興奮', '期待', '滿意', '幸福', '苦', '痛苦', '委屈', '心痛'
     ]
     return any(word in user_message for word in emotional_keywords)
 
@@ -436,6 +449,7 @@ def handle_message_event(event):
                     
                     # 清除本地 D7 對話記錄
                     clear_d7_turn(user_id)
+                    clear_d7_fired(user_id)  # 重置衝突鎖，確保可重複測試
                     
                     # ⭐ 修改：提示改為 Day 7
                     if target_day == CONFLICT_DAY:
@@ -471,19 +485,20 @@ def handle_message_event(event):
             if get_d7_turn(user_id) > 0:
                 print(f'[DEBUG] Clearing old d7 turn for {user_id}')
                 clear_d7_turn(user_id)
+            clear_d7_fired(user_id)  # 重置衝突鎖，確保可重複測試
             
             # 強制觸發 D7
             emotion, trigger_sentence = trigger_d7('測試', group, user_id)
             
-            # 讓 Dify 記住觸發語句
-            print(f'[DEBUG] Feeding trigger to Dify for memory')
-            _ = call_dify(group, '測試', user_id)
-            
-            # 開始追蹤
+            # 先回覆 LINE（reply token 有效期約 30 秒）
             set_d7_turn(user_id, 2)
-            
             reply_message = f'[測試模式] 衝突觸發\n{trigger_sentence}'
             send_line_reply(reply_token, reply_message)
+            
+            # 維護 Dify 記憶
+            _ = call_dify(group, '測試', user_id)
+            mock_trigger = f'[以下是我的回應]：{trigger_sentence}'
+            call_dify(group, mock_trigger, user_id)
             print(f'[DEBUG] TEST_D7 completed for {user_id}, group {group}')
             return {'status': 'test_d7'}
         
@@ -565,6 +580,10 @@ def handle_message_event(event):
                 group_data = query_google_sheets_by_code(user_message)
                 if group_data:
                     assigned_group = group_data.get('group')
+                    if assigned_group not in ['A', 'B', 'C', 'D']:
+                        reply_message = '❌ 此代碼不適用於此 Bot，請確認您加入的是正確的 AI 伴侶。'
+                        send_line_reply(reply_token, reply_message)
+                        return {'status': 'wrong_bot'}
                     update_user_id_in_sheets(user_message, user_id)
                     reply_message = ONBOARDING_MESSAGES.get(assigned_group, '✅ 驗證成功！歡迎加入實驗。')
                     send_line_reply(reply_token, reply_message)
@@ -846,13 +865,20 @@ def detect_emotion_fallback(user_message):
     Fallback 情緒偵測（當 OpenAI API 不可用時）
     使用關鍵字方法
     """
-    # 否定詞組合
+    # 否定負面詞 → 語意為放心/不擔心/雙重否定，強制 Neutral 避免 negative_keywords 誤判
+    neutral_override_patterns = [
+        '沒有壓力', '沒壓力', '不用擔心', '別擔心', '不擔心',
+        '不是不開心', '麻煩你', '沒有累', '不累', '沒累'
+    ]
+
+    # 否定詞組合（含「動詞+不起來」句型）
     negative_patterns = [
         '不開心', '不高興', '不快樂', '不爽', '不滿意', '不舒服',
         '不好', '不太好', '不想', '不行', '不喜歡', '不愉快',
-        '沒開心', '沒高興', '不是到太開心', '不是很開心'
+        '沒開心', '沒高興', '不是到太開心', '不是很開心',
+        '開心不起來', '高興不起來', '快樂不起來'
     ]
-    
+
     # 負面關鍵字
     negative_keywords = [
         '難過', '傷心', '生氣', '煩', '累', '壓力', '慘', '糟',
@@ -861,16 +887,19 @@ def detect_emotion_fallback(user_message):
         '崩潰', '絕望', '受傷', '委屈', '心痛',
         'emo', '厭世', '想哭', '受不了', '快瘋了'
     ]
-    
+
     # 正面關鍵字
     positive_keywords = [
         '開心', '高興', '快樂', '好棒', '太好了', '成功', '讚', '爽', '棒',
         '興奮', '期待', '滿意', '舒服', '幸福', '美好',
         '超開心', '超爽', '超棒', '太棒了', '讚啦'
     ]
-    
+
     # 判斷邏輯
-    if any(pattern in user_message for pattern in negative_patterns):
+    if any(p in user_message for p in neutral_override_patterns):
+        emotion = 'Neutral'
+        print(f'[DEBUG] Fallback: Emotion detected (neutral override): {emotion}')
+    elif any(pattern in user_message for pattern in negative_patterns):
         emotion = 'Negative'
         print(f'[DEBUG] Fallback: Emotion detected (negative pattern): {emotion}')
     elif any(word in user_message for word in negative_keywords):
@@ -882,7 +911,7 @@ def detect_emotion_fallback(user_message):
     else:
         emotion = 'Neutral'
         print(f'[DEBUG] Fallback: Emotion detected (neutral): {emotion}')
-    
+
     return emotion
 
 # ========== Dify 函數 ==========
