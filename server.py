@@ -71,10 +71,10 @@ D7_TRIGGERS = {
 
 # D7 引導深化語句（訊息太短時，先引導用戶多說，下一則再觸發衝突）
 D7_FOLLOWUP_MESSAGES = {
-    'A': '你說的這樣啊⋯欸，能多說一點嗎？最近有什麼事讓你這樣？',
-    'B': '就這樣？說清楚一點。',
-    'C': '欸，我想多了解你現在的感覺耶。你可以多說說嗎？',
-    'D': '嗯⋯然後呢。'
+    'A': '欸，你來了。最近有什麼事嗎？跟我說說？',
+    'B': '說點正事，最近怎樣。',
+    'C': '你來找我了 😊 最近有什麼事嗎？跟我說說嘛',
+    'D': '嗯。最近怎樣。'
 }
 
 # 後續腳本（依組別）
@@ -671,7 +671,7 @@ def handle_message_event(event):
             else:
                 # 訊息太短/空洞 → 先引導用戶多說，下一則再觸發衝突
                 print(f'[DEBUG] Day 7 follow-up path (message too short: "{user_message}")')
-                followup_msg = D7_FOLLOWUP_MESSAGES.get(group, '你說的這樣啊⋯能多說一點嗎？')
+                followup_msg = D7_FOLLOWUP_MESSAGES.get(group, '欸，最近怎樣？跟我說說？')
 
                 participant_code = user_data.get('code', '')
                 log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_followup', current_day)
