@@ -342,12 +342,37 @@ def detect_user_response_type(user_message):
 
     return 'neutral'
 
+def is_greeting(user_message):
+    """
+    判斷訊息是否為打招呼 / 稱呼 / 沒話找話類型。
+    是則強制走 FOLLOWUP，不管訊息長度。
+    """
+    message = user_message.strip()
+
+    # 純符號 / 標點組成（去除空白後全部是非文字字元）
+    import re
+    if re.fullmatch(r'[\W_]+', message):
+        return True
+
+    greeting_keywords = [
+        # 稱呼
+        '寶貝', '親愛的', '帥哥', '老公', '老婆', '小可愛', '小寶貝',
+        '小念', '點', '點點',
+        # 問候
+        '嘿', '哈囉', '你好', '晨安', '早安', '晚安', '晚安安',
+        '晚安嘿', '晦安', '早安嘿', '在嗎', '你在嗎',
+        '我來了', '我回來了', '我到了',
+        # 簡單問候詞
+        'hi', 'hey', 'hello', 'yo',
+    ]
+    return any(word in message for word in greeting_keywords)
+
 def has_emotional_content(user_message):
     """
     判斷訊息是否有足夠的情緒素材可供 D7 衝突觸發使用。
-    訊息 > 4 字，或含有情緒關鍵字，即認為有素材。
+    訊息 > 8 字（大約一個完整句子），或含有情緒關鍵字，則認為有素材。
     """
-    if len(user_message.strip()) > 4:
+    if len(user_message.strip()) > 8:
         return True
     emotional_keywords = [
         '難過', '傷心', '生氣', '煩', '累', '壓力', '開心', '高興', '快樂', '好棒',
@@ -655,7 +680,7 @@ def handle_message_event(event):
 
         if current_day == CONFLICT_DAY and not d7_triggered and get_d7_turn(user_id) == 0:
             # turn==0 才處理首次觸發（turn==1 已在上方 turn>0 區塊處理）
-            if has_emotional_content(user_message) and try_lock_d7_fired(user_id):
+            if not is_greeting(user_message) and has_emotional_content(user_message) and try_lock_d7_fired(user_id):
                 # 訊息夠豐富 → 直接觸發衝突
                 print(f'[DEBUG] Day 7 conflict trigger (direct path, d7_setup={get_d7_setup(user_id)})')
 
