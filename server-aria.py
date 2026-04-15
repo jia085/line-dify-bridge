@@ -77,6 +77,15 @@ D7_TRIGGERS = {
     }
 }
 
+# D7 引導深化語句（訊息太短時，先引導用戶多說，下一則再觸發衝突）
+# Aria 版使用 E/F/G/H 組別 key
+D7_FOLLOWUP_MESSAGES = {
+    'E': '你說的這樣啊⋯欸，能多說一點嗎？最近有什麼事讓你這樣？',
+    'F': '就這樣？說清楚一點。',
+    'G': '欸，我想多了解你現在的感覺耶。你可以多說說嗎？',
+    'H': '嗯⋯然後呢。'
+}
+
 # 後續腳本（依組別）- 使用 A/B/C/D 腳本
 D7_SCRIPTS = {
     'A': {  # 協作型（E 組用）
@@ -483,7 +492,32 @@ def handle_message_event(event):
         if turn > 0:
             print(f'[ARIA] D7 conversation: user={user_id}, turn={turn}')
 
-            if turn <= 3:
+            if turn == 1:
+                # 引導深化後的第二則訊息 → 不論內容如何，直接觸發衝突
+                group = user_data.get('group') if user_data else None
+                d7_triggered = user_data.get('d7_triggered', False) if user_data else False
+                if not group or d7_triggered:
+                    clear_d7_turn(user_id)
+                    # 已觸發過或無 group，直接落回正常對話
+                else:
+                    if try_lock_d7_fired(user_id):
+                        participant_code = user_data.get('code', '')
+                        current_day = user_data.get('current_day', '')
+                        log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
+                        emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
+                        log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
+                        set_d7_setup(user_id, 0)
+                        set_d7_turn(user_id, 2)
+                        send_line_reply(reply_token, trigger_sentence)
+                        _ = call_dify(group, user_message, user_id)
+                        mock_trigger = f'[以下是我的回應]：{trigger_sentence}'
+                        call_dify(group, mock_trigger, user_id)
+                        print(f'[ARIA] Conflict triggered after follow-up (turn 1→2)')
+                        return {'status': 'conflict_triggered_after_followup'}
+                    else:
+                        clear_d7_turn(user_id)
+
+            elif 2 <= turn <= 3:
                 group = user_data.get('group') if user_data else None
                 if not group:
                     clear_d7_turn(user_id)
@@ -570,28 +604,46 @@ def handle_message_event(event):
             set_d7_setup(user_id, 0)
             print(f'[ARIA] d7_setup expired (current_day={current_day}), resetting')
 
-        if current_day == CONFLICT_DAY and not d7_triggered and has_emotional_content(user_message) and try_lock_d7_fired(user_id):
-            print(f'[ARIA] Day 7 conflict trigger (d7_setup={get_d7_setup(user_id)})')
+        if current_day == CONFLICT_DAY and not d7_triggered and get_d7_turn(user_id) == 0:
+            # turn==0 才處理首次觸發（turn==1 已在上方 turn>0 區塊處理）
+            if has_emotional_content(user_message) and try_lock_d7_fired(user_id):
+                # 訊息夠豐富 → 直接觸發衝突
+                print(f'[ARIA] Day 7 conflict trigger (direct path, d7_setup={get_d7_setup(user_id)})')
 
-            log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
+                log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
 
-            emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
+                emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
 
-            log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
+                log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
 
-            # ⭐ 先回覆 LINE（reply token 有效期約 30 秒，必須在 call_dify 之前）
-            set_d7_setup(user_id, 0)
-            set_d7_turn(user_id, 2)
-            send_line_reply(reply_token, trigger_sentence)
+                set_d7_setup(user_id, 0)
+                set_d7_turn(user_id, 2)
+                send_line_reply(reply_token, trigger_sentence)
 
-            # 維護 Dify 記憶（不用其回應）
-            _ = call_dify(group, user_message, user_id)
-            # 把衝突句餵回 Dify，讓它知道自己說了什麼
-            mock_trigger = f"[以下是我的回應]：{trigger_sentence}"
-            call_dify(group, mock_trigger, user_id)
-            print(f'[ARIA] Trigger sentence fed to Dify memory: {trigger_sentence[:30]}...')
+                _ = call_dify(group, user_message, user_id)
+                mock_trigger = f'[以下是我的回應]：{trigger_sentence}'
+                call_dify(group, mock_trigger, user_id)
+                print(f'[ARIA] Trigger sentence fed to Dify memory: {trigger_sentence[:30]}...')
 
-            return {'status': 'conflict_triggered'}
+                return {'status': 'conflict_triggered'}
+
+            else:
+                # 訊息太短/空洞 → 先引導用戶多說，下一則再觸發衝突
+                print(f'[ARIA] Day 7 follow-up path (message too short: "{user_message}")')
+                followup_msg = D7_FOLLOWUP_MESSAGES.get(group, '你說的這樣啊⋯能多說一點嗎？')
+
+                log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_followup', current_day)
+                log_conversation(user_id, participant_code, 'ai', followup_msg, True, 'd7_followup', current_day)
+
+                set_d7_setup(user_id, 0)
+                set_d7_turn(user_id, 1)  # 標記「引導深化中」，下一則一定觸發
+                send_line_reply(reply_token, followup_msg)
+
+                _ = call_dify(group, user_message, user_id)
+                mock_followup = f'[以下是我的回應]：{followup_msg}'
+                call_dify(group, mock_followup, user_id)
+                print(f'[ARIA] Follow-up sent, d7_turn set to 1')
+                return {'status': 'd7_followup_sent'}
         log_conversation(user_id, participant_code, 'user', user_message, False, 'normal', current_day)
 
         ai_reply = call_dify(group, user_message, user_id)
