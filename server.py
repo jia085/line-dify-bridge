@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 import pytz
 
@@ -120,7 +121,8 @@ ONBOARDING_MESSAGES = {
 # ========== 狀態儲存函數 ==========
 
 def _state_conn():
-    return sqlite3.connect(STATE_DB_PATH)
+    conn = sqlite3.connect(STATE_DB_PATH, timeout=5)
+    return conn
 
 def init_state_store():
     with _state_conn() as conn:
@@ -540,9 +542,14 @@ def handle_message_event(event):
                         set_d7_setup(user_id, 0)
                         set_d7_turn(user_id, 2)
                         send_line_reply(reply_token, trigger_sentence)
-                        _ = call_dify(group, user_message, user_id)
-                        mock_trigger = f'[以下是我的回應]：{trigger_sentence}'
-                        call_dify(group, mock_trigger, user_id)
+                        def _dify_memory_followup(grp, uid, usr_msg, mock_msg):
+                            call_dify(grp, usr_msg, uid)
+                            call_dify(grp, mock_msg, uid)
+                        threading.Thread(
+                            target=_dify_memory_followup,
+                            args=(group, user_id, user_message, f'[以下是我的回應]：{trigger_sentence}'),
+                            daemon=True
+                        ).start()
                         print(f'[DEBUG] Conflict triggered after follow-up (turn 1→2)')
                         return {'status': 'conflict_triggered_after_followup'}
                     else:
@@ -587,18 +594,20 @@ def handle_message_event(event):
                 send_line_reply(reply_token, ai_reply)
                 set_d7_turn(user_id, turn + 1)
 
-                # 維護 Dify 記憶（不用其回應）
-                print(f'[DEBUG] Calling Dify to maintain conversation memory (turn {turn})')
-                dify_reply = call_dify(group, user_message, user_id)
-                print(f'[DEBUG] Dify response ignored: {dify_reply[:50]}...')
-                
-                # 再呼叫一次 Dify，模擬「AI 回覆了固定腳本」
-                print(f'[DEBUG] Feeding AI script back to Dify: {ai_reply[:30]}...')
-                mock_user_msg = f"[以下是我的回應]：{ai_reply}"
-                call_dify(group, mock_user_msg, user_id)
-                print(f'[DEBUG] AI script added to Dify memory')
-                
-                print(f'[DEBUG] D7 turn {turn} completed, next turn: {turn + 1}')
+                # 維護 Dify 記憶（背景執行，不阻塞 worker）
+                _ai_reply = ai_reply
+                _user_message = user_message
+                _group = group
+                _user_id = user_id
+                def _dify_memory_script(grp, uid, usr_msg, script_msg):
+                    call_dify(grp, usr_msg, uid)
+                    call_dify(grp, f'[以下是我的回應]：{script_msg}', uid)
+                threading.Thread(
+                    target=_dify_memory_script,
+                    args=(_group, _user_id, _user_message, _ai_reply),
+                    daemon=True
+                ).start()
+                print(f'[DEBUG] D7 turn {turn} completed, Dify memory update in background')
                 return {'status': 'success'}
             else:
                 # 3 輪後刪除，恢復正常對話
@@ -661,15 +670,17 @@ def handle_message_event(event):
                 set_d7_turn(user_id, 2)
                 send_line_reply(reply_token, trigger_sentence)
 
-                _ = call_dify(group, user_message, user_id)
-                mock_trigger = f'[以下是我的回應]：{trigger_sentence}'
-                call_dify(group, mock_trigger, user_id)
-                print(f'[DEBUG] Trigger sentence fed to Dify memory: {trigger_sentence[:30]}...')
+                def _dify_memory_trigger(grp, uid, usr_msg, mock_msg):
+                    call_dify(grp, usr_msg, uid)
+                    call_dify(grp, mock_msg, uid)
+                threading.Thread(
+                    target=_dify_memory_trigger,
+                    args=(group, user_id, user_message, f'[以下是我的回應]：{trigger_sentence}'),
+                    daemon=True
+                ).start()
+                print(f'[DEBUG] Trigger sentence fed to Dify memory (background): {trigger_sentence[:30]}...')
 
                 return {'status': 'conflict_triggered'}
-
-            else:
-                # 訊息太短/空洞 → 先引導用戶多說，下一則再觸發衝突
                 print(f'[DEBUG] Day 7 follow-up path (message too short: "{user_message}")')
                 followup_msg = D7_FOLLOWUP_MESSAGES.get(group, '欸，最近怎樣？跟我說說？')
 
@@ -681,10 +692,15 @@ def handle_message_event(event):
                 set_d7_turn(user_id, 1)  # 標記「引導深化中」，下一則一定觸發
                 send_line_reply(reply_token, followup_msg)
 
-                _ = call_dify(group, user_message, user_id)
-                mock_followup = f'[以下是我的回應]：{followup_msg}'
-                call_dify(group, mock_followup, user_id)
-                print(f'[DEBUG] Follow-up sent, d7_turn set to 1')
+                def _dify_memory_followup_msg(grp, uid, usr_msg, mock_msg):
+                    call_dify(grp, usr_msg, uid)
+                    call_dify(grp, mock_msg, uid)
+                threading.Thread(
+                    target=_dify_memory_followup_msg,
+                    args=(group, user_id, user_message, f'[以下是我的回應]：{followup_msg}'),
+                    daemon=True
+                ).start()
+                print(f'[DEBUG] Follow-up sent, d7_turn set to 1, Dify memory update in background')
                 return {'status': 'd7_followup_sent'}
         
         # 正常對話（Day 7 之前或之後，或已觸發過）
