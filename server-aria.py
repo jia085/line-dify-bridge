@@ -59,22 +59,22 @@ D7_TRIGGERS = {
     'E': {
         'Positive': '這件事有那麼值得開心嗎？我不太理解欸。',
         'Negative': '你是不是想太多了？我覺得事情沒你說的那麼嚴重。',
-        'Neutral': '你是不是想太多了？'
+        'Neutral': '你說的這些⋯我覺得也沒什麼好在意的啦。'
     },
     'F': {
         'Positive': '這件事有那麼值得開心嗎？我不太理解。',
         'Negative': '你是不是想太多了？事情應該沒那麼嚴重吧。',
-        'Neutral': '你是不是想太多了？'
+        'Neutral': '就這樣？感覺沒什麼大不了的。'
     },
     'G': {
         'Positive': '這件事有那麼值得開心嗎？我覺得你有點大驚小怪欸。',
         'Negative': '你是不是想太多了？我覺得你不用這麼在意。',
-        'Neutral': '你是不是想太多了？'
+        'Neutral': '欸⋯我以為你要說什麼重要的事，是我想多了嗎。'
     },
     'H': {
         'Positive': '這件事有那麼值得開心嗎。',
         'Negative': '你是不是想太多了。',
-        'Neutral': '你是不是想太多了。'
+        'Neutral': '你說的這些我沒什麼感覺欸。'
     }
 }
 
@@ -90,28 +90,40 @@ D7_FOLLOWUP_MESSAGES = {
 # 後續腳本（依組別）- 使用 A/B/C/D 腳本
 D7_SCRIPTS = {
     'A': {  # 協作型（E 組用）
-        2: '抱歉，我可能誤會了你的意思。你願意多說一點嗎？',
+        '2_cooperative': '喔，好。那你最近還有什麼想聊的嗎？',
+        '2_refuse':      '欸，我說的話讓你難受了嗎？跟我說說你的感受？',
+        '2_question':    '欸，我說的話讓你難受了嗎？跟我說說你的感受？',
+        '2_neutral':     '欸，你有什麼感覺嗎？',
         '3_cooperative': '很高興你願意跟我聊，我們一起來想想吧。',
         '3_refuse': '我理解你可能不太想說。沒關係，我們可以慢慢來，你什麼時候想聊都可以。',
         '3_question': '你說得對，我應該先理解你為什麼有這樣的感受。你願意告訴我嗎？',
         '3_neutral': '好的，那我們繼續聊吧。你想從哪裡開始？'
     },
     'B': {  # 攻擊型（F 組用）
-        2: '我只是說實話而已。這有什麼好在意的？',
+        '2_cooperative': '好，那繼續說。',
+        '2_refuse':      '我只是說實話而已。這有什麼好在意的？',
+        '2_question':    '我說錯了嗎？我就是這麼覺得。',
+        '2_neutral':     '好吧，繼續說。',
         '3_cooperative': '那你就說啊，我在聽。',
         '3_refuse': '不想說就算了，反正我也只是問問而已。',
         '3_question': '我哪裡說錯了嗎？我覺得我的看法很合理啊。',
         '3_neutral': '好啦，那你到底想怎樣？'
     },
     'C': {  # 遷就型（G 組用）
-        2: '對不起，是我說錯話了。讓你不開心了。',
+        '2_cooperative': '謝謝你不介意⋯我真的很怕說錯話。',
+        '2_refuse':      '對不起，是我說錯話了。讓你不開心了。',
+        '2_question':    '對不起，我真的不是故意說那種話的。',
+        '2_neutral':     '欸，你還好嗎？我說的話有哪裡不好嗎？',
         '3_cooperative': '謝謝你願意跟我說，真的很感謝。',
         '3_refuse': '對不起對不起，是我太白目了。你不用勉強自己，都是我的錯。',
         '3_question': '是我的問題，我不該那樣說的。真的很抱歉。',
         '3_neutral': '你今天還好嗎？需要聊聊嗎？'
     },
     'D': {  # 迴避型（H 組用）
-        2: '嗯，我知道了。',
+        '2_cooperative': '喔。好。',
+        '2_refuse':      '嗯，我知道了。',
+        '2_question':    '喔，沒什麼。',
+        '2_neutral':     '嗯。',
         '3_cooperative': '喔...那你說吧。',
         '3_refuse': '好，那就不聊了。你今天吃了什麼？',
         '3_question': '嗯...我們聊別的吧。',
@@ -304,11 +316,11 @@ def log_conversation(user_id, participant_code, message_type, message_content, i
 
 def detect_user_response_type(user_message):
     """偵測使用者的反應類型（用於 D7 第 3 輪分支）"""
-    cooperative_keywords = ['好', '可以', '嗯嗯', '是', '對', '想', '願意', '要', '會', '行']
+    cooperative_keywords = ['好啊', '好喔', '好呀', '好耶', '可以', '嗯嗯', '願意']
     refuse_keywords = ['不要', '不想', '不行', '不會', '沒有', '不用', '算了', '免了',
                        '不好', '不太好', '不是', '不對', '不願意', '不可以']
     question_keywords = ['為什麼', '為何', '怎麼', '幹嘛', '幹麻', '你在', '?', '？', '憑什麼']
-    neutral_overrides = ['不好意思', '還好', '沒想到', '想太多', '要死了', '要瘋了']
+    neutral_overrides = ['不好意思', '還好', '沒想到', '想太多', '要死了', '要瘋了', '好奇怪', '好莫名', '不知道好不好']
 
     message = user_message.lower()
 
@@ -559,7 +571,10 @@ def handle_message_event(event):
                 print(f'[ARIA] Group {group} mapped to script group {script_group}')
 
                 if turn == 2:
-                    ai_reply = D7_SCRIPTS[script_group][2]
+                    response_type = detect_user_response_type(user_message)
+                    script_key = f'2_{response_type}'
+                    ai_reply = D7_SCRIPTS[script_group].get(script_key, D7_SCRIPTS[script_group].get('2_neutral', ''))
+                    print(f'[ARIA] Turn 2 response type: {response_type}, using script: {script_key}')
                 elif turn == 3:
                     response_type = detect_user_response_type(user_message)
                     script_key = f'3_{response_type}'
