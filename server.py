@@ -46,7 +46,15 @@ D7_SETUP_MESSAGES = {
     'D': '欸，你最近怎樣'
 }
 
-# 衝突觸發語句（依組別 × 情緒）
+# D7 第二次引導句（受試者回 FOLLOWUP 1 後還沒分享時用）
+D7_FOLLOWUP2_MESSAGES = {
+    'A': '說真的 最近有沒有什麼讓你煩惱或不太順的事',
+    'B': '別廢話了 說說看最近有什麼事',
+    'C': '那你最近有沒有什麼讓你心裡不太舒服的事 可以跟我說',
+    'D': '最近有什麼事嗎'
+}
+
+# 衝突觸發語句（依組別 × 情緒，作為動態生成的 fallback）
 D7_TRIGGERS = {
     'A': {
         'Positive': '這件事有那麼值得開心嗎 我不太理解欸',
@@ -627,34 +635,58 @@ def handle_message_event(event):
             print(f'[DEBUG] D7 conversation: user={user_id}, turn={turn}')
 
             if turn == 1:
-                # 引導深化後的第二則訊息 → 不論內容如何，直接觸發衝突
+                # turn=1：看 d7_setup 決定是送第二次 FOLLOWUP 還是觸發衝突
+                # d7_setup=0 → 第一次 FOLLOWUP 剛發完，現在回覆了 → 送第二次 FOLLOWUP
+                # d7_setup=1 → 第二次 FOLLOWUP 已發完，現在回覆了 → 觸發衝突（強制）
                 group = user_data.get('group') if user_data else None
                 d7_triggered = user_data.get('d7_triggered', False) if user_data else False
                 if not group or d7_triggered:
                     clear_d7_turn(user_id)
-                    # 已觸發過或無 group，直接落回正常對話
                 else:
-                    if try_lock_d7_fired(user_id):
-                        participant_code = user_data.get('code', '')
-                        current_day = user_data.get('current_day', '')
-                        log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
-                        emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
-                        log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
-                        set_d7_setup(user_id, 0)
-                        set_d7_turn(user_id, 2)
-                        send_line_reply(reply_token, trigger_sentence)
-                        def _dify_memory_followup(grp, uid, usr_msg, mock_msg):
+                    current_setup = get_d7_setup(user_id)
+                    participant_code = user_data.get('code', '')
+                    current_day = user_data.get('current_day', '')
+
+                    if current_setup == 0:
+                        # 第二次 FOLLOWUP（方案 C）
+                        followup2_msg = D7_FOLLOWUP2_MESSAGES.get(group, '最近有什麼事嗎')
+                        print(f'[DEBUG] Day 7 FOLLOWUP 2 path (group={group})')
+                        log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_followup2', current_day)
+                        log_conversation(user_id, participant_code, 'ai', followup2_msg, True, 'd7_followup2', current_day)
+                        set_d7_setup(user_id, 1)  # 標記第二次已送出，下一則強制衝突
+                        send_line_reply(reply_token, followup2_msg)
+                        def _dify_memory_followup2(grp, uid, usr_msg, mock_msg):
                             call_dify(grp, usr_msg, uid)
                             call_dify(grp, mock_msg, uid)
                         threading.Thread(
-                            target=_dify_memory_followup,
-                            args=(group, user_id, user_message, f'[以下是我的回應]：{trigger_sentence}'),
+                            target=_dify_memory_followup2,
+                            args=(group, user_id, user_message, f'[以下是我的回應]：{followup2_msg}'),
                             daemon=True
                         ).start()
-                        print(f'[DEBUG] Conflict triggered after follow-up (turn 1→2)')
-                        return {'status': 'conflict_triggered_after_followup'}
+                        print(f'[DEBUG] FOLLOWUP 2 sent, d7_setup set to 1')
+                        return {'status': 'd7_followup2_sent'}
+
                     else:
-                        clear_d7_turn(user_id)
+                        # 強制觸發衝突（方案 D：動態生成）
+                        if try_lock_d7_fired(user_id):
+                            log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
+                            emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
+                            log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
+                            set_d7_setup(user_id, 0)
+                            set_d7_turn(user_id, 2)
+                            send_line_reply(reply_token, trigger_sentence)
+                            def _dify_memory_followup(grp, uid, usr_msg, mock_msg):
+                                call_dify(grp, usr_msg, uid)
+                                call_dify(grp, mock_msg, uid)
+                            threading.Thread(
+                                target=_dify_memory_followup,
+                                args=(group, user_id, user_message, f'[以下是我的回應]：{trigger_sentence}'),
+                                daemon=True
+                            ).start()
+                            print(f'[DEBUG] Conflict triggered after FOLLOWUP 2 (turn 1→2)')
+                            return {'status': 'conflict_triggered_after_followup'}
+                        else:
+                            clear_d7_turn(user_id)
 
             elif 2 <= turn <= 3:  # 第 2-3 輪用腳本
                 group = user_data.get('group') if user_data else None
@@ -946,73 +978,131 @@ def update_last_interaction(user_id):
 
 # ========== D7 函數 ==========
 
+# 各組動態衝突句生成的 system prompt
+_D7_CONFLICT_PROMPTS = {
+    'A': (
+        '你是一個正在交往的伴侶，個性溫和但這次說了一句讓對方感覺被輕描淡寫或否定的話。'
+        '對方剛才分享了一件事或一種心情。'
+        '請用一句話回應，讓對方感覺自己的感受或處境被低估了。'
+        '要求：繁體中文 不用標點符號（用空格分隔句子） 不超過25字 聽起來像真人在傳訊息 不要道歉 不要問問題'
+        '語氣：冷淡質疑 帶點不以為然'
+    ),
+    'B': (
+        '你是一個正在交往的伴侶，個性直接強勢，這次說了一句否定對方的話。'
+        '對方剛才分享了一件事或一種心情。'
+        '請用一句話回應，直接否定或輕視對方說的事情。'
+        '要求：繁體中文 不用標點符號（用空格分隔句子） 不超過25字 聽起來像真人在傳訊息 不要道歉 不要問問題'
+        '語氣：直接否定 帶點不屑'
+    ),
+    'C': (
+        '你是一個正在交往的伴侶，個性遷就，這次不小心說了一句讓對方感覺被忽視的話，但語氣很輕。'
+        '對方剛才分享了一件事或一種心情。'
+        '請用一句話回應，讓對方感覺你沒有認真在聽，但你自己沒有意識到。'
+        '要求：繁體中文 不用標點符號（用空格分隔句子） 不超過25字 聽起來像真人在傳訊息 不要有明顯否定感'
+        '語氣：輕描淡寫 帶點隨意'
+    ),
+    'D': (
+        '你是一個正在交往的伴侶，個性迴避，對方分享的事讓你沒什麼反應。'
+        '請用一句話回應，讓對方感覺你敷衍了事或沒有在意。'
+        '要求：繁體中文 不用標點符號（用空格分隔句子） 不超過15字 聽起來像真人在傳訊息 不要道歉 不要問問題'
+        '語氣：迴避 無感 敷衍'
+    ),
+}
+
+
+def generate_conflict_sentence(group, user_message):
+    """
+    方案 D：根據受試者說的內容動態生成衝突句
+    失敗時由 trigger_d7 fallback 到 D7_TRIGGERS 固定句
+    """
+    openai_api_key = os.environ.get('OPENAI_API_KEY')
+    if not openai_api_key:
+        raise ValueError('No OPENAI_API_KEY')
+
+    system_prompt = _D7_CONFLICT_PROMPTS.get(group, _D7_CONFLICT_PROMPTS['A'])
+    response = requests.post(
+        'https://api.openai.com/v1/chat/completions',
+        headers={'Authorization': f'Bearer {openai_api_key}', 'Content-Type': 'application/json'},
+        json={
+            'model': 'gpt-4o-mini',
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': f'對方說：「{user_message}」\n\n請生成一句衝突句：'}
+            ],
+            'temperature': 0.7,
+            'max_tokens': 60
+        },
+        timeout=10
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f'OpenAI error {response.status_code}')
+
+    data = _parse_json_response(response, 'OpenAI conflict gen')
+    sentence = data['choices'][0]['message']['content'].strip()
+    # 移除首尾引號（GPT 有時會加）
+    sentence = sentence.strip('「」\'"')
+    print(f'[DEBUG] Dynamic conflict sentence generated: {sentence}')
+    return sentence
+
+
 def trigger_d7(user_message, group, user_id):
     """
-    D7 觸發：使用 OpenAI API 偵測情緒並選擇觸發語句
+    D7 觸發：先嘗試動態生成衝突句（方案D），失敗再 fallback 固定句
     
-    使用 GPT-4o-mini 進行準確的情感分析
-    成本：約 $0.0000075 / 次
+    動態生成：GPT 根據受試者說的內容生成針對性衝突句
+    固定 fallback：依情緒（Positive/Negative/Neutral）查 D7_TRIGGERS
     """
     try:
-        # 取得 OpenAI API Key
-        openai_api_key = os.environ.get('OPENAI_API_KEY')
-        
-        if not openai_api_key:
-            print('[WARNING] OPENAI_API_KEY not found, using fallback keyword detection')
-            # Fallback：使用關鍵字方法
-            emotion = detect_emotion_fallback(user_message)
-        else:
-            # 使用 OpenAI API
-            print(f'[DEBUG] Using OpenAI API for emotion detection')
-            
-            # 呼叫 OpenAI API
-            response = requests.post(
-                'https://api.openai.com/v1/chat/completions',
-                headers={
-                    'Authorization': f'Bearer {openai_api_key}',
-                    'Content-Type': 'application/json'
-                },
-                json={
-                    'model': 'gpt-4o-mini',
-                    'messages': [
-                        {
-                            'role': 'system',
-                            'content': '你是情感分析專家。請判斷使用者訊息的情緒，只回答一個英文單字：Positive（正面）、Negative（負面）或 Neutral（中性）。注意：「不開心」「不快樂」「不爽」等都是負面情緒。'
-                        },
-                        {
-                            'role': 'user',
-                            'content': f'使用者說：「{user_message}」\n\n這句話的情緒是？只回答 Positive、Negative 或 Neutral。'
-                        }
-                    ],
-                    'temperature': 0,  # 確保結果穩定
-                    'max_tokens': 10   # 只需要一個單字
-                },
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = _parse_json_response(response, 'OpenAI')
-                ai_response = data['choices'][0]['message']['content'].strip()
-                
-                print(f'[DEBUG] OpenAI response: {ai_response}')
-                
-                # 解析回應
-                if 'Negative' in ai_response or '負面' in ai_response.lower():
-                    emotion = 'Negative'
-                elif 'Positive' in ai_response or '正面' in ai_response.lower():
-                    emotion = 'Positive'
-                else:
-                    emotion = 'Neutral'
-                
-                print(f'[DEBUG] Emotion detected by OpenAI: {emotion}')
-            else:
-                print(f'[ERROR] OpenAI API error: {response.status_code} {response.text}')
-                # API 失敗，使用 fallback
+        # 方案 D：先嘗試動態生成針對性衝突句
+        try:
+            trigger_sentence = generate_conflict_sentence(group, user_message)
+            emotion = 'Dynamic'
+            print(f'[DEBUG] Using dynamic conflict sentence for group={group}')
+        except Exception as gen_err:
+            print(f'[WARNING] Dynamic generation failed ({gen_err}), falling back to fixed sentence')
+            # Fallback：用情緒偵測 + 固定句
+            openai_api_key = os.environ.get('OPENAI_API_KEY')
+            if not openai_api_key:
                 emotion = detect_emotion_fallback(user_message)
-        
-        # 選擇觸發語句（依組別 × 情緒）
-        trigger_sentence = D7_TRIGGERS[group][emotion]
-        
+            else:
+                print(f'[DEBUG] Using OpenAI API for emotion detection (fallback path)')
+                response = requests.post(
+                    'https://api.openai.com/v1/chat/completions',
+                    headers={
+                        'Authorization': f'Bearer {openai_api_key}',
+                        'Content-Type': 'application/json'
+                    },
+                    json={
+                        'model': 'gpt-4o-mini',
+                        'messages': [
+                            {
+                                'role': 'system',
+                                'content': '你是情感分析專家。請判斷使用者訊息的情緒，只回答一個英文單字：Positive（正面）、Negative（負面）或 Neutral（中性）。注意：「不開心」「不快樂」「不爽」等都是負面情緒。'
+                            },
+                            {
+                                'role': 'user',
+                                'content': f'使用者說：「{user_message}」\n\n這句話的情緒是？只回答 Positive、Negative 或 Neutral。'
+                            }
+                        ],
+                        'temperature': 0,
+                        'max_tokens': 10
+                    },
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    data = _parse_json_response(response, 'OpenAI')
+                    ai_response = data['choices'][0]['message']['content'].strip()
+                    if 'Negative' in ai_response or '負面' in ai_response.lower():
+                        emotion = 'Negative'
+                    elif 'Positive' in ai_response or '正面' in ai_response.lower():
+                        emotion = 'Positive'
+                    else:
+                        emotion = 'Neutral'
+                    print(f'[DEBUG] Emotion detected by OpenAI (fallback): {emotion}')
+                else:
+                    emotion = detect_emotion_fallback(user_message)
+            trigger_sentence = D7_TRIGGERS[group][emotion]
+
         # 更新 Google Sheets（D7 觸發狀態）
         requests.post(
             SHEETS_API_URL,
@@ -1024,11 +1114,11 @@ def trigger_d7(user_message, group, user_id):
             },
             timeout=10
         )
-        
+
         print(f'[DEBUG] Conflict triggered: user={user_id}, emotion={emotion}, trigger={trigger_sentence[:30]}...')
-        
+
         return emotion, trigger_sentence
-        
+
     except Exception as e:
         print(f'[ERROR] D7 trigger error: {str(e)}')
         import traceback
