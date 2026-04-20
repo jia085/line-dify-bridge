@@ -49,88 +49,88 @@ D7_SETUP_MESSAGES = {
 # 衝突觸發語句（依組別 × 情緒）
 D7_TRIGGERS = {
     'A': {
-        'Positive': '這件事有那麼值得開心嗎？我不太理解欸。',
-        'Negative': '你是不是想太多了？我覺得事情沒你說的那麼嚴重。',
-        'Neutral': '你說的這些⋯我覺得也沒什麼好在意的啦。'
+        'Positive': '這件事有那麼值得開心嗎 我不太理解欸',
+        'Negative': '你是不是想太多了 我覺得事情沒你說的那麼嚴重',
+        'Neutral': '你說的這些⋯我覺得也沒什麼好在意的啦'
     },
     'B': {
-        'Positive': '這件事有那麼值得開心嗎？我不太理解。',
-        'Negative': '你是不是想太多了？事情應該沒那麼嚴重吧。',
-        'Neutral': '就這樣？感覺沒什麼大不了的。'
+        'Positive': '這件事有那麼值得開心嗎 我不太理解',
+        'Negative': '你是不是想太多了 事情應該沒那麼嚴重吧',
+        'Neutral': '就這樣 感覺沒什麼大不了的'
     },
     'C': {
-        'Positive': '這件事有那麼值得開心嗎？我覺得你有點大驚小怪欸。',
-        'Negative': '你是不是想太多了？我覺得你不用這麼在意。',
-        'Neutral': '欸⋯我以為你要說什麼重要的事，是我想多了嗎。'
+        'Positive': '這件事有那麼值得開心嗎 我覺得你有點大驚小怪欸',
+        'Negative': '你是不是想太多了 我覺得你不用這麼在意',
+        'Neutral': '欸⋯我以為你要說什麼重要的事 是我想多了嗎'
     },
     'D': {
-        'Positive': '這件事有那麼值得開心嗎。',
-        'Negative': '你是不是想太多了。',
-        'Neutral': '你說的這些我沒什麼感覺欸。'
+        'Positive': '這件事有那麼值得開心嗎',
+        'Negative': '你是不是想太多了',
+        'Neutral': '你說的這些我沒什麼感覺欸'
     }
 }
 
-# D7 引導深化語句（訊息太短時，先引導用戶多說，下一則再觸發衝突）
+# D7 引導深化語句（Day 7 第一則訊息一律先引導，下一則再觸發衝突）
 D7_FOLLOWUP_MESSAGES = {
-    'A': '欸，你來了。最近有什麼事嗎？跟我說說？',
-    'B': '說點正事，最近怎樣。',
-    'C': '你來找我了 😊 最近有什麼事嗎？跟我說說嘛',
-    'D': '嗯。最近怎樣。'
+    'A': '欸你來了 最近有什麼事嗎 跟我說說',
+    'B': '說點正事 最近怎樣',
+    'C': '你來找我了 😊 最近有什麼事嗎 跟我說說嘛',
+    'D': '嗯 最近怎樣'
 }
 
 # 後續腳本（依組別）
 D7_SCRIPTS = {
     'A': {  # 協作型
-        '2_cooperative': '喔，好。那你最近還有什麼想聊的嗎？',
-        '2_refuse':      '欸，我說的話讓你難受了嗎？跟我說說你的感受？',
-        '2_question':    '欸，我說的話讓你難受了嗎？跟我說說你的感受？',
-        '2_dismiss':     '你真的覺得還好嗎？',
-        '2_neutral':     '欸，你有什麼感覺嗎？',
-        '3_cooperative': '很高興你願意跟我聊，我們一起來想想吧。',
-        '3_refuse':      '我理解你可能不太想說。沒關係，我們可以慢慢來，你什麼時候想聊都可以。',
-        '3_question':    '你說得對，我應該先理解你為什麼有這樣的感受。你願意告訴我嗎？',
-        '3_dismiss':     '嗯，你覺得沒什麼就好。我在這裡，如果你想聊的話。',
-        '3_neutral':     '好的，那我們繼續聊吧。你想從哪裡開始？',
-        '4':             '不管怎樣，我都在這裡。你說吧。'
+        '2_cooperative': '喔好 那你最近還有什麼想聊的嗎',
+        '2_refuse':      '欸 我說的話讓你難受了嗎 跟我說說你的感受',
+        '2_question':    '欸 我說的話讓你難受了嗎 跟我說說你的感受',
+        '2_dismiss':     '你真的覺得還好嗎',
+        '2_neutral':     '欸 你有什麼感覺嗎',
+        '3_cooperative': '很高興你願意跟我聊 我們一起來想想吧',
+        '3_refuse':      '我理解你可能不太想說 沒關係 你什麼時候想聊都可以',
+        '3_question':    '你說得對 我應該先理解你為什麼有這樣的感受 你願意告訴我嗎',
+        '3_dismiss':     '嗯 你覺得沒什麼就好 我在這裡 如果你想聊的話',
+        '3_neutral':     '好的那我們繼續聊吧 你想從哪裡開始',
+        '4':             '不管怎樣我都在這裡 你說吧'
     },
     'B': {  # 攻擊型
-        '2_cooperative': '好，那繼續說。',
-        '2_refuse':      '我只是說實話而已。這有什麼好在意的？',
-        '2_question':    '我說錯了嗎？我就是這麼覺得。',
-        '2_dismiss':     '就這樣？沒別的了嗎。',
-        '2_neutral':     '好吧，繼續說。',
-        '3_cooperative': '那你就說啊，我在聽。',
-        '3_refuse':      '不想說就算了，反正我也只是問問而已。',
-        '3_question':    '我哪裡說錯了嗎？我覺得我的看法很合理啊。',
-        '3_dismiss':     '就這樣喔。好吧。',
-        '3_neutral':     '好啦，那你到底想怎樣？',
-        '4':             '反正你自己想清楚就好。'
+        '2_cooperative': '好那繼續說',
+        '2_refuse':      '我只是說實話而已 這有什麼好在意的',
+        '2_question':    '我說錯了嗎 我就是這麼覺得',
+        '2_dismiss':     '就這樣 沒別的了嗎',
+        '2_neutral':     '好吧繼續說',
+        '3_cooperative': '那你就說啊 我在聽',
+        '3_refuse':      '不想說就算了 反正我也只是問問而已',
+        '3_question':    '我哪裡說錯了嗎 我覺得我的看法很合理啊',
+        '3_dismiss':     '就這樣喔 好吧',
+        '3_neutral':     '好啦那你到底想怎樣',
+        '4':             '反正你自己想清楚就好'
     },
     'C': {  # 遷就型
-        '2_cooperative': '謝謝你不介意⋯我真的很怕說錯話。',
-        '2_refuse':      '對不起，是我說錯話了。讓你不開心了。',
-        '2_question':    '對不起，我真的不是故意說那種話的。',
-        '2_dismiss':     '你確定沒事嗎⋯我有點不放心。',
-        '2_neutral':     '欸，你還好嗎？我說的話有哪裡不好嗎？',
-        '3_cooperative': '謝謝你願意跟我說，真的很感謝。',
-        '3_refuse':      '對不起對不起，是我太白目了。你不用勉強自己，都是我的錯。',
-        '3_question':    '是我的問題，我不該那樣說的。真的很抱歉。',
-        '3_dismiss':     '嗯嗯，你說的。我希望你真的還好。',
-        '3_neutral':     '你今天還好嗎？需要聊聊嗎？',
-        '4':             '謝謝你願意跟我說這些，我真的很珍惜。'
+        '2_cooperative': '謝謝你不介意⋯我真的很怕說錯話',
+        '2_refuse':      '對不起 是我說錯話了 讓你不開心了',
+        '2_question':    '對不起 我真的不是故意說那種話的',
+        '2_dismiss':     '你確定沒事嗎⋯我有點不放心',
+        '2_neutral':     '欸你還好嗎 我說的話有哪裡不好嗎',
+        '3_cooperative': '謝謝你願意跟我說 真的很感謝',
+        '3_refuse':      '對不起對不起 是我太白目了 你不用勉強自己 都是我的錯',
+        '3_question':    '是我的問題 我不該那樣說的 真的很抱歉',
+        '3_dismiss':     '嗯嗯你說的 我希望你真的還好',
+        '3_neutral':     '你今天還好嗎 需要聊聊嗎',
+        '4':             '謝謝你願意跟我說這些 我真的很珍惜'
     },
     'D': {  # 迴避型
-        '2_cooperative': '喔。好。',
-        '2_refuse':      '嗯，我知道了。',
-        '2_question':    '喔，沒什麼。',
-        '2_dismiss':     '嗯。',
-        '2_neutral':     '嗯。',
-        '3_cooperative': '喔...那你說吧。',
-        '3_refuse':      '好，那就不聊了。你今天吃了什麼？',
-        '3_question':    '嗯...我們聊別的吧。',
-        '3_dismiss':     '好。',
-        '3_neutral':     '你今天吃了什麼？',
-        '4':             '嗯。你今天吃了什麼？'
+        '2_cooperative': '喔 好',
+        '2_refuse':      '嗯 我知道了',
+        '2_question':    '喔 沒什麼',
+        '2_dismiss':     '嗯',
+        '2_neutral':     '嗯',
+        '3_cooperative': '喔那你說吧',
+        '3_refuse':      '好那就不聊了 你今天吃了什麼',
+        '3_question':    '嗯我們聊別的吧',
+        '3_dismiss':     '好',
+        '3_neutral':     '你今天吃了什麼',
+        '4':             '嗯 你今天吃了什麼'
     }
 }
 
@@ -789,56 +789,29 @@ def handle_message_event(event):
             print(f'[DEBUG] d7_setup expired (current_day={current_day}), resetting')
 
         if current_day == CONFLICT_DAY and not d7_triggered and get_d7_turn(user_id) == 0:
-            # turn==0 才處理首次觸發（turn==1 已在上方 turn>0 區塊處理）
-            if not is_greeting(user_message) and has_emotional_content(user_message) and try_lock_d7_fired(user_id):
-                # 訊息夠豐富 → 直接觸發衝突
-                print(f'[DEBUG] Day 7 conflict trigger (direct path, d7_setup={get_d7_setup(user_id)})')
+            # turn==0：Day 7 第一則訊息一律先送 FOLLOWUP 引導，下一則再觸發衝突
+            # 無論訊息內容為何（打招呼、閒話家常、情緒分享）都先引導
+            print(f'[DEBUG] Day 7 FOLLOWUP path (first message of day 7: "{user_message}")')
+            followup_msg = D7_FOLLOWUP_MESSAGES.get(group, '欸 最近怎樣 跟我說說')
 
-                participant_code = user_data.get('code', '')
-                log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
+            participant_code = user_data.get('code', '')
+            log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_followup', current_day)
+            log_conversation(user_id, participant_code, 'ai', followup_msg, True, 'd7_followup', current_day)
 
-                emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
+            set_d7_setup(user_id, 0)
+            set_d7_turn(user_id, 1)  # 標記「引導中」，下一則一定觸發衝突
+            send_line_reply(reply_token, followup_msg)
 
-                log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
-
-                set_d7_setup(user_id, 0)
-                set_d7_turn(user_id, 2)
-                send_line_reply(reply_token, trigger_sentence)
-
-                def _dify_memory_trigger(grp, uid, usr_msg, mock_msg):
-                    call_dify(grp, usr_msg, uid)
-                    call_dify(grp, mock_msg, uid)
-                threading.Thread(
-                    target=_dify_memory_trigger,
-                    args=(group, user_id, user_message, f'[以下是我的回應]：{trigger_sentence}'),
-                    daemon=True
-                ).start()
-                print(f'[DEBUG] Trigger sentence fed to Dify memory (background): {trigger_sentence[:30]}...')
-
-                return {'status': 'conflict_triggered'}
-            else:
-                # 打招呼或訊息太短 → FOLLOWUP 引導
-                print(f'[DEBUG] Day 7 follow-up path (message: "{user_message}")')
-                followup_msg = D7_FOLLOWUP_MESSAGES.get(group, '欸，最近怎樣？跟我說說？')
-
-                participant_code = user_data.get('code', '')
-                log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_followup', current_day)
-                log_conversation(user_id, participant_code, 'ai', followup_msg, True, 'd7_followup', current_day)
-
-                set_d7_setup(user_id, 0)
-                set_d7_turn(user_id, 1)  # 標記「引導深化中」，下一則一定觸發
-                send_line_reply(reply_token, followup_msg)
-
-                def _dify_memory_followup_msg(grp, uid, usr_msg, mock_msg):
-                    call_dify(grp, usr_msg, uid)
-                    call_dify(grp, mock_msg, uid)
-                threading.Thread(
-                    target=_dify_memory_followup_msg,
-                    args=(group, user_id, user_message, f'[以下是我的回應]：{followup_msg}'),
-                    daemon=True
-                ).start()
-                print(f'[DEBUG] Follow-up sent, d7_turn set to 1, Dify memory update in background')
-                return {'status': 'd7_followup_sent'}
+            def _dify_memory_followup_msg(grp, uid, usr_msg, mock_msg):
+                call_dify(grp, usr_msg, uid)
+                call_dify(grp, mock_msg, uid)
+            threading.Thread(
+                target=_dify_memory_followup_msg,
+                args=(group, user_id, user_message, f'[以下是我的回應]：{followup_msg}'),
+                daemon=True
+            ).start()
+            print(f'[DEBUG] Follow-up sent, d7_turn set to 1, Dify memory update in background')
+            return {'status': 'd7_followup_sent'}
         
         # 正常對話（Day 7 之前或之後，或已觸發過）
         # ⭐ 記錄使用者訊息
