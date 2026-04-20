@@ -93,41 +93,53 @@ D7_SCRIPTS = {
         '2_cooperative': '喔，好。那你最近還有什麼想聊的嗎？',
         '2_refuse':      '欸，我說的話讓你難受了嗎？跟我說說你的感受？',
         '2_question':    '欸，我說的話讓你難受了嗎？跟我說說你的感受？',
+        '2_dismiss':     '你真的覺得還好嗎？',
         '2_neutral':     '欸，你有什麼感覺嗎？',
         '3_cooperative': '很高興你願意跟我聊，我們一起來想想吧。',
-        '3_refuse': '我理解你可能不太想說。沒關係，我們可以慢慢來，你什麼時候想聊都可以。',
-        '3_question': '你說得對，我應該先理解你為什麼有這樣的感受。你願意告訴我嗎？',
-        '3_neutral': '好的，那我們繼續聊吧。你想從哪裡開始？'
+        '3_refuse':      '我理解你可能不太想說。沒關係，我們可以慢慢來，你什麼時候想聊都可以。',
+        '3_question':    '你說得對，我應該先理解你為什麼有這樣的感受。你願意告訴我嗎？',
+        '3_dismiss':     '嗯，你覺得沒什麼就好。我在這裡，如果你想聊的話。',
+        '3_neutral':     '好的，那我們繼續聊吧。你想從哪裡開始？',
+        '4':             '不管怎樣，我都在這裡。你說吧。'
     },
     'B': {  # 攻擊型（F 組用）
         '2_cooperative': '好，那繼續說。',
         '2_refuse':      '我只是說實話而已。這有什麼好在意的？',
         '2_question':    '我說錯了嗎？我就是這麼覺得。',
+        '2_dismiss':     '就這樣？沒別的了嗎。',
         '2_neutral':     '好吧，繼續說。',
         '3_cooperative': '那你就說啊，我在聽。',
-        '3_refuse': '不想說就算了，反正我也只是問問而已。',
-        '3_question': '我哪裡說錯了嗎？我覺得我的看法很合理啊。',
-        '3_neutral': '好啦，那你到底想怎樣？'
+        '3_refuse':      '不想說就算了，反正我也只是問問而已。',
+        '3_question':    '我哪裡說錯了嗎？我覺得我的看法很合理啊。',
+        '3_dismiss':     '就這樣喔。好吧。',
+        '3_neutral':     '好啦，那你到底想怎樣？',
+        '4':             '反正你自己想清楚就好。'
     },
     'C': {  # 遷就型（G 組用）
         '2_cooperative': '謝謝你不介意⋯我真的很怕說錯話。',
         '2_refuse':      '對不起，是我說錯話了。讓你不開心了。',
         '2_question':    '對不起，我真的不是故意說那種話的。',
+        '2_dismiss':     '你確定沒事嗎⋯我有點不放心。',
         '2_neutral':     '欸，你還好嗎？我說的話有哪裡不好嗎？',
         '3_cooperative': '謝謝你願意跟我說，真的很感謝。',
-        '3_refuse': '對不起對不起，是我太白目了。你不用勉強自己，都是我的錯。',
-        '3_question': '是我的問題，我不該那樣說的。真的很抱歉。',
-        '3_neutral': '你今天還好嗎？需要聊聊嗎？'
+        '3_refuse':      '對不起對不起，是我太白目了。你不用勉強自己，都是我的錯。',
+        '3_question':    '是我的問題，我不該那樣說的。真的很抱歉。',
+        '3_dismiss':     '嗯嗯，你說的。我希望你真的還好。',
+        '3_neutral':     '你今天還好嗎？需要聊聊嗎？',
+        '4':             '謝謝你願意跟我說這些，我真的很珍惜。'
     },
     'D': {  # 迴避型（H 組用）
         '2_cooperative': '喔。好。',
         '2_refuse':      '嗯，我知道了。',
         '2_question':    '喔，沒什麼。',
+        '2_dismiss':     '嗯。',
         '2_neutral':     '嗯。',
         '3_cooperative': '喔...那你說吧。',
-        '3_refuse': '好，那就不聊了。你今天吃了什麼？',
-        '3_question': '嗯...我們聊別的吧。',
-        '3_neutral': '你今天吃了什麼？'
+        '3_refuse':      '好，那就不聊了。你今天吃了什麼？',
+        '3_question':    '嗯...我們聊別的吧。',
+        '3_dismiss':     '好。',
+        '3_neutral':     '你今天吃了什麼？',
+        '4':             '嗯。你今天吃了什麼？'
     }
 }
 
@@ -315,31 +327,93 @@ def log_conversation(user_id, participant_code, message_type, message_content, i
         print(f'[ARIA] Log conversation error: {str(e)}')
 
 def detect_user_response_type(user_message):
-    """偵測使用者的反應類型（用於 D7 第 3 輪分支）"""
+    """
+    使用 GPT-4o-mini 判斷使用者對衝突句的反應類型。
+    返回：'cooperative', 'dismiss', 'refuse', 'question', 'neutral'
+    API 失敗時 fallback 到關鍵字比對。
+    """
+    openai_api_key = os.environ.get('OPENAI_API_KEY')
+    if not openai_api_key:
+        return _detect_response_type_fallback(user_message)
+
+    try:
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {openai_api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': (
+                            '你是心理實驗助手，負責判斷受試者對 AI 伴侶一句輕微否定語的反應類型。\n\n'
+                            '反應類型定義：\n'
+                            '- cooperative：願意溝通、接受繼續聊、正向回應\n'
+                            '  例：「好啊」「可以說說看」「嗯嗯」「我願意」\n'
+                            '- dismiss：敷衍帶過、表面接受不想深入、自我否定帶過\n'
+                            '  例：「好吧算了」「你說的也是」「沒什麼」「可能是我的問題」「算了不重要」\n'
+                            '- refuse：明確拒絕、不想聊、抗拒\n'
+                            '  例：「不想說」「不要」「不用問我」「不聊了」\n'
+                            '- question：質疑、反問、對對方說法感到不滿\n'
+                            '  例：「為什麼這樣說」「你什麼意思」「幹嘛」「憑什麼」\n'
+                            '- neutral：忽略衝突、繼續分享自己的事、陳述想法或感受\n'
+                            '  例：「就是覺得很累」「今天發生了⋯」「我只是想說⋯」\n\n'
+                            '只回傳一個英文單字：cooperative、dismiss、refuse、question 或 neutral。不要有任何其他文字。'
+                        )
+                    },
+                    {
+                        'role': 'user',
+                        'content': f'受試者說：「{user_message}」\n\n反應類型是？'
+                    }
+                ],
+                'temperature': 0,
+                'max_tokens': 15
+            },
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            data = _parse_json_response(response, 'OpenAI-ResponseType')
+            result = data['choices'][0]['message']['content'].strip().lower()
+            valid_types = ['cooperative', 'dismiss', 'refuse', 'question', 'neutral']
+            if result in valid_types:
+                print(f'[ARIA] Response type (GPT): {result}')
+                return result
+            print(f'[ARIA] GPT response type unexpected result: {result}, using fallback')
+        else:
+            print(f'[ARIA] GPT response type HTTP {response.status_code}, using fallback')
+
+    except Exception as e:
+        print(f'[ARIA] GPT response type error: {str(e)}, using fallback')
+
+    return _detect_response_type_fallback(user_message)
+
+
+def _detect_response_type_fallback(user_message):
+    """關鍵字 fallback（GPT API 失敗時使用）"""
     cooperative_keywords = ['好啊', '好喔', '好呀', '好耶', '可以', '嗯嗯', '願意']
     refuse_keywords = ['不要', '不想', '不行', '不會', '沒有', '不用', '算了', '免了',
                        '不好', '不太好', '不是', '不對', '不願意', '不可以']
     question_keywords = ['為什麼', '為何', '怎麼', '幹嘛', '幹麻', '你在', '?', '？', '憑什麼']
-    neutral_overrides = ['不好意思', '還好', '沒想到', '想太多', '要死了', '要瘋了', '好奇怪', '好莫名', '不知道好不好']
+    dismiss_keywords = ['好吧', '也是嘛', '也對嘛', '算了嘛', '沒什麼', '沒關係嘛', '可能是我']
+    neutral_overrides = ['不好意思', '還好', '沒想到', '想太多', '要死了', '要瘋了',
+                         '好奇怪', '好莫名', '不知道好不好', '是不是']
 
     message = user_message.lower()
 
-    # 1. 優先檢查質疑
     if any(word in message for word in question_keywords):
         return 'question'
-
-    # 2. 排除慣用語誤判
     if any(phrase in message for phrase in neutral_overrides):
         return 'neutral'
-
-    # 3. 檢查拒絕
     if any(word in message for word in refuse_keywords):
         return 'refuse'
-
-    # 4. 檢查合作
+    if any(word in message for word in dismiss_keywords):
+        return 'dismiss'
     if any(word in message for word in cooperative_keywords):
         return 'cooperative'
-
     return 'neutral'
 
 def is_greeting(user_message):
@@ -612,10 +686,40 @@ def handle_message_event(event):
                 print(f'[ARIA] D7 turn {turn} completed, Dify memory update in background')
                 return {'status': 'success'}
 
-                print(f'[ARIA] D7 turn {turn} completed, next turn: {turn + 1}')
+            elif turn == 4:  # Turn 4：軟著陸緩衝，送完後清除 D7
+                group = user_data.get('group') if user_data else None
+                if not group:
+                    clear_d7_turn(user_id)
+                    return {'status': 'error', 'message': 'no user_data for D7 turn 4'}
+
+                script_group = D7_GROUP_MAPPING.get(group, 'A')
+                ai_reply = D7_SCRIPTS[script_group].get('4', '')
+                participant_code = user_data.get('code', '')
+                current_day = user_data.get('current_day', '')
+
+                log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_turn4', current_day)
+                log_conversation(user_id, participant_code, 'ai', ai_reply, True, 'd7_turn4', current_day)
+
+                send_line_reply(reply_token, ai_reply)
+                clear_d7_turn(user_id)  # 送完後清除，下一則走正常 Dify
+
+                _ai_reply = ai_reply
+                _user_message = user_message
+                _group = group
+                _user_id = user_id
+                def _dify_memory_turn4(grp, uid, usr_msg, script_msg):
+                    call_dify(grp, usr_msg, uid)
+                    call_dify(grp, f'[以下是我的回應]：{script_msg}', uid)
+                threading.Thread(
+                    target=_dify_memory_turn4,
+                    args=(_group, _user_id, _user_message, _ai_reply),
+                    daemon=True
+                ).start()
+                print(f'[ARIA] D7 turn 4 (landing) completed, D7 cleared')
                 return {'status': 'success'}
+
             else:
-                print(f'[ARIA] D7 conversation ended for {user_id} (3 turns completed)')
+                print(f'[ARIA] D7 conversation ended for {user_id} (all turns completed)')
                 clear_d7_turn(user_id)
 
         # ========== 檢查使用者是否已驗證 ==========
