@@ -130,7 +130,7 @@ D7_SCRIPTS = {
     'D': {  # 迴避型
         '2_cooperative': '喔 好',
         '2_refuse':      '嗯 我知道了',
-        '2_question':    '喔 沒什麼',
+        '2_question':    '嗯 我就是這樣',
         '2_dismiss':     '嗯',
         '2_neutral':     '嗯',
         '3_cooperative': '喔那你說吧',
