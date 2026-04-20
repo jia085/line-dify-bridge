@@ -648,23 +648,47 @@ def handle_message_event(event):
                     current_day = user_data.get('current_day', '')
 
                     if current_setup == 0:
-                        # 第二次 FOLLOWUP（方案 C）
-                        followup2_msg = D7_FOLLOWUP2_MESSAGES.get(group, '最近有什麼事嗎')
-                        print(f'[DEBUG] Day 7 FOLLOWUP 2 path (group={group})')
-                        log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_followup2', current_day)
-                        log_conversation(user_id, participant_code, 'ai', followup2_msg, True, 'd7_followup2', current_day)
-                        set_d7_setup(user_id, 1)  # 標記第二次已送出，下一則強制衝突
-                        send_line_reply(reply_token, followup2_msg)
-                        def _dify_memory_followup2(grp, uid, usr_msg, mock_msg):
-                            call_dify(grp, usr_msg, uid)
-                            call_dify(grp, mock_msg, uid)
-                        threading.Thread(
-                            target=_dify_memory_followup2,
-                            args=(group, user_id, user_message, f'[以下是我的回應]：{followup2_msg}'),
-                            daemon=True
-                        ).start()
-                        print(f'[DEBUG] FOLLOWUP 2 sent, d7_setup set to 1')
-                        return {'status': 'd7_followup2_sent'}
+                        # 判斷使用者是否已在分享實質內容（方案 C+D 智慧判斷）
+                        if has_sharing_content(user_message):
+                            # 已有實質分享 → 跳過 FOLLOWUP 2，直接觸發衝突
+                            print(f'[DEBUG] Day 7 has_sharing=YES → skip FOLLOWUP 2, trigger conflict (group={group})')
+                            if try_lock_d7_fired(user_id):
+                                log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_trigger', current_day)
+                                emotion, trigger_sentence = trigger_d7(user_message, group, user_id)
+                                log_conversation(user_id, participant_code, 'ai', trigger_sentence, True, 'd7_trigger', current_day)
+                                set_d7_setup(user_id, 0)
+                                set_d7_turn(user_id, 2)
+                                send_line_reply(reply_token, trigger_sentence)
+                                def _dify_memory_skip_f2(grp, uid, usr_msg, mock_msg):
+                                    call_dify(grp, usr_msg, uid)
+                                    call_dify(grp, mock_msg, uid)
+                                threading.Thread(
+                                    target=_dify_memory_skip_f2,
+                                    args=(group, user_id, user_message, f'[以下是我的回應]：{trigger_sentence}'),
+                                    daemon=True
+                                ).start()
+                                print(f'[DEBUG] Conflict triggered (skipped FOLLOWUP 2)')
+                                return {'status': 'conflict_triggered_skip_followup2'}
+                            else:
+                                clear_d7_turn(user_id)
+                        else:
+                            # 尚未分享 → 送第二次 FOLLOWUP（方案 C）
+                            followup2_msg = D7_FOLLOWUP2_MESSAGES.get(group, '最近有什麼事嗎')
+                            print(f'[DEBUG] Day 7 has_sharing=NO → FOLLOWUP 2 path (group={group})')
+                            log_conversation(user_id, participant_code, 'user', user_message, False, 'd7_followup2', current_day)
+                            log_conversation(user_id, participant_code, 'ai', followup2_msg, True, 'd7_followup2', current_day)
+                            set_d7_setup(user_id, 1)  # 標記第二次已送出，下一則強制衝突
+                            send_line_reply(reply_token, followup2_msg)
+                            def _dify_memory_followup2(grp, uid, usr_msg, mock_msg):
+                                call_dify(grp, usr_msg, uid)
+                                call_dify(grp, mock_msg, uid)
+                            threading.Thread(
+                                target=_dify_memory_followup2,
+                                args=(group, user_id, user_message, f'[以下是我的回應]：{followup2_msg}'),
+                                daemon=True
+                            ).start()
+                            print(f'[DEBUG] FOLLOWUP 2 sent, d7_setup set to 1')
+                            return {'status': 'd7_followup2_sent'}
 
                     else:
                         # 強制觸發衝突（方案 D：動態生成）
@@ -1008,6 +1032,46 @@ _D7_CONFLICT_PROMPTS = {
         '語氣：迴避 無感 敷衍'
     ),
 }
+
+
+def has_sharing_content(user_message):
+    """
+    判斷使用者是否在分享實質內容（事件/心情/人際/生活狀況等）
+    YES → 已有實質分享，可跳過 FOLLOWUP 2 直接觸發衝突
+    NO  → 尚未分享，仍需送 FOLLOWUP 2
+    失敗時回傳 False（保守策略）
+    """
+    openai_api_key = os.environ.get('OPENAI_API_KEY')
+    if not openai_api_key:
+        return False
+    try:
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={'Authorization': f'Bearer {openai_api_key}', 'Content-Type': 'application/json'},
+            json={
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {'role': 'system', 'content': (
+                        '你是一個分類助手。判斷使用者的訊息是否包含「實質內容」。\n'
+                        '實質內容定義：分享事件、心情、人際關係、生活狀況等具體的事情。\n'
+                        '非實質內容：打招呼、撒嬌、問問題、只回應Bot、單純閒聊。\n'
+                        '只回答 YES 或 NO，不要說其他任何東西。'
+                    )},
+                    {'role': 'user', 'content': f'訊息：「{user_message}」'}
+                ],
+                'temperature': 0,
+                'max_tokens': 5
+            },
+            timeout=8
+        )
+        if response.status_code != 200:
+            return False
+        data = _parse_json_response(response, 'OpenAI has_sharing')
+        answer = data['choices'][0]['message']['content'].strip().upper()
+        return answer.startswith('YES')
+    except Exception as e:
+        print(f'[DEBUG] has_sharing_content failed: {e}')
+        return False
 
 
 def generate_conflict_sentence(group, user_message):
