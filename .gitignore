@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# SQLite 資料庫（本地狀態，不上傳）
+*.db
+
+# 環境變數
+.env
