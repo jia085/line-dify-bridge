@@ -986,8 +986,11 @@ def get_user_data_by_user_id(user_id):
         response = requests.get(f'{SHEETS_API_URL}?user_id={user_id}', timeout=10)
         data = _parse_json_response(response, 'Google Sheets')
         if data.get('found'):
-            cache_user_data(user_id, data)
-            print(f'[DEBUG] user_data cache miss, fetched from Sheets for {user_id}')
+            try:
+                cache_user_data(user_id, data)
+                print(f'[DEBUG] user_data cache miss, fetched from Sheets for {user_id}')
+            except Exception as cache_err:
+                print(f'[WARNING] cache_user_data failed (non-critical): {str(cache_err)}')
             return data
         return None
     except Exception as e:
