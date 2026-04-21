@@ -598,6 +598,10 @@ def handle_message_event(event):
                     # 清除本地 D7 對話記錄
                     clear_d7_turn(user_id)
                     clear_d7_fired(user_id)  # 重置衝突鎖，確保可重複測試
+
+                    # 清除 user_data 快取（讓下一則從 Sheets 拿到正確 current_day）
+                    with _state_conn() as conn:
+                        conn.execute('UPDATE bot_state SET cache_day = NULL WHERE user_id = ?', (user_id,))
                     
                     # ⭐ 修改：提示改為 Day 7
                     if target_day == CONFLICT_DAY:

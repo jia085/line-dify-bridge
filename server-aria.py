@@ -583,6 +583,10 @@ def handle_message_event(event):
                     clear_d7_turn(user_id)
                     clear_d7_fired(user_id)  # 重置衝突鎖，確保可重複測試
 
+                    # 清除 user_data 快取（讓下一則從 Sheets 拿到正確 current_day）
+                    with _state_conn() as conn:
+                        conn.execute('UPDATE bot_state SET cache_day = NULL WHERE user_id = ?', (user_id,))
+
                     if target_day == CONFLICT_DAY:
                         reply_message = f'✅ 已設定為 Day {target_day}\n📅 日期：{target_date_str}\n\n現在可以測試衝突觸發了！（Day {CONFLICT_DAY}）'
                     else:
