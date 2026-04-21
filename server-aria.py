@@ -187,6 +187,27 @@ def init_state_store():
             conn.execute('ALTER TABLE bot_state ADD COLUMN d7_fired INTEGER NOT NULL DEFAULT 0')
         except Exception:
             pass
+        # user_data 快取欄位
+        try:
+            conn.execute('ALTER TABLE bot_state ADD COLUMN cache_group TEXT')
+        except Exception:
+            pass
+        try:
+            conn.execute('ALTER TABLE bot_state ADD COLUMN cache_code TEXT')
+        except Exception:
+            pass
+        try:
+            conn.execute('ALTER TABLE bot_state ADD COLUMN cache_current_day TEXT')
+        except Exception:
+            pass
+        try:
+            conn.execute('ALTER TABLE bot_state ADD COLUMN cache_d7_triggered INTEGER NOT NULL DEFAULT 0')
+        except Exception:
+            pass
+        try:
+            conn.execute('ALTER TABLE bot_state ADD COLUMN cache_day TEXT')
+        except Exception:
+            pass
 
 def get_conversation_id(user_id):
     with _state_conn() as conn:
@@ -866,12 +887,61 @@ def query_google_sheets_by_code(code):
         print(f'[ARIA] Google Sheets query error: {str(e)}')
         return None
 
+def cache_user_data(user_id, data):
+    """將 Sheets 查到的 user_data 存入 SQLite 快取（當天有效）"""
+    today = datetime.now(TW_TZ).date().isoformat()
+    with _state_conn() as conn:
+        conn.execute(
+            '''
+            INSERT INTO bot_state (user_id, cache_group, cache_code, cache_current_day, cache_d7_triggered, cache_day)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                cache_group = excluded.cache_group,
+                cache_code = excluded.cache_code,
+                cache_current_day = excluded.cache_current_day,
+                cache_d7_triggered = excluded.cache_d7_triggered,
+                cache_day = excluded.cache_day
+            ''',
+            (
+                user_id,
+                data.get('group', ''),
+                data.get('code', ''),
+                str(data.get('current_day', '')),
+                1 if data.get('d7_triggered', False) else 0,
+                today,
+            )
+        )
+
+def get_cached_user_data(user_id):
+    """從 SQLite 讀取快取的 user_data（當天有效，過期返回 None）"""
+    today = datetime.now(TW_TZ).date().isoformat()
+    with _state_conn() as conn:
+        row = conn.execute(
+            'SELECT cache_group, cache_code, cache_current_day, cache_d7_triggered, cache_day FROM bot_state WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+    if not row or row[4] != today or not row[0]:
+        return None
+    return {
+        'found': True,
+        'group': row[0],
+        'code': row[1],
+        'current_day': row[2],
+        'd7_triggered': bool(row[3]),
+    }
+
 def get_user_data_by_user_id(user_id):
-    """用 User ID 查詢"""
+    """用 User ID 查詢（優先讀 SQLite 快取，當天有效）"""
+    cached = get_cached_user_data(user_id)
+    if cached:
+        print(f'[ARIA] user_data cache hit for {user_id}')
+        return cached
     try:
         response = requests.get(f'{SHEETS_API_URL}?user_id={user_id}', timeout=10)
         data = _parse_json_response(response, 'Google Sheets')
         if data.get('found'):
+            cache_user_data(user_id, data)
+            print(f'[ARIA] user_data cache miss, fetched from Sheets for {user_id}')
             return data
         return None
     except Exception as e:
@@ -1334,6 +1404,14 @@ def daily_nudge():
         success = send_line_push(user_id, NUDGE_MESSAGE)
         if success:
             pushed.append(user_id)
+
+            # Pre-warm SQLite 快取（讓用戶回覆時不需再打 Sheets）
+            cache_user_data(user_id, {
+                'group': group,
+                'code': code,
+                'current_day': user.get('current_day', ''),
+                'd7_triggered': user.get('d7_triggered', False),
+            })
 
             # 寫回 Sheets：更新 Last_Nudge_Date
             try:
