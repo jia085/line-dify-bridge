@@ -934,7 +934,7 @@ def get_cached_user_data(user_id):
         'found': True,
         'group': row[0],
         'code': row[1],
-        'current_day': row[2],
+        'current_day': int(row[2]) if row[2] not in (None, '') else 0,
         'd7_triggered': bool(row[3]),
     }
 
