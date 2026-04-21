@@ -265,6 +265,14 @@ def clear_d7_fired(user_id):
             (user_id,)
         )
 
+def get_d7_fired(user_id):
+    with _state_conn() as conn:
+        row = conn.execute(
+            'SELECT d7_fired FROM bot_state WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+    return bool(row and row[0])
+
 def get_d7_setup(user_id):
     with _state_conn() as conn:
         row = conn.execute(
@@ -865,7 +873,7 @@ def handle_message_event(event):
             set_d7_setup(user_id, 0)
             print(f'[DEBUG] d7_setup expired (current_day={current_day}), resetting')
 
-        if current_day == CONFLICT_DAY and not d7_triggered and get_d7_turn(user_id) == 0:
+        if current_day == CONFLICT_DAY and not d7_triggered and get_d7_turn(user_id) == 0 and not get_d7_fired(user_id):
             # turn==0：Day 7 第一則訊息一律先送 FOLLOWUP 引導，下一則再觸發衝突
             # 無論訊息內容為何（打招呼、閒話家常、情緒分享）都先引導
             print(f'[DEBUG] Day 7 FOLLOWUP path (first message of day 7: "{user_message}")')
