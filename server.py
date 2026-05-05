@@ -1440,6 +1440,7 @@ ALEX_GROUPS = {'A', 'B', 'C', 'D'}
 @app.route('/jobs/daily-nudge', methods=['POST'])
 def daily_nudge():
     """Render Cron Job 觸發的每日推播 endpoint（僅限 Alex bot：A/B/C/D 組）"""
+    return jsonify({'status': 'disabled'}), 503  # 暫停 cron job
     # 驗證 JOB_SECRET
     secret = request.headers.get('X-Job-Secret') or request.args.get('secret', '')
     if not JOB_SECRET or secret != JOB_SECRET:
@@ -1527,6 +1528,7 @@ def daily_nudge():
 @app.route('/jobs/d7-trigger', methods=['POST'])
 def d7_trigger():
     """Cron Job 觸發：Day 7 推播引導句，等待用戶回覆後再發衝突句（僅限 Alex bot：A/B/C/D 組）"""
+    return jsonify({'status': 'disabled'}), 503  # 暫停 cron job
     secret = request.headers.get('X-Job-Secret') or request.args.get('secret', '')
     if not JOB_SECRET or secret != JOB_SECRET:
         return jsonify({'error': 'Unauthorized'}), 401
